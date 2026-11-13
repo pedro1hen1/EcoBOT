@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="icons/icon-128.png" width="72" alt="EcoBot">
+  <img src="extensao/icons/icon-128.png" width="72" alt="EcoBot">
 </p>
 <h1 align="center">EcoBot</h1>
 <p align="center">Seu plano. Cada lance, uma nova combinação.</p>
@@ -157,6 +157,7 @@ Esta etapa é opcional. Para instalar, basta usar a pasta `extensao` já incluí
 Com Node.js 22+ e npm:
 
 ```sh
+cd codigo
 npm ci
 npm run lint
 npm run build
@@ -165,9 +166,7 @@ npm run build
 O build atualiza `extensao/`. Depois, recarregue a extensão e a aba do jogo.
 
 ```text
-src/             Código-fonte TypeScript
-icons/           Ícones do EcoBot
-data/            Catálogo de referência
+codigo/          Fontes e arquivos de compilação
 extensao/        Extensão final, pronta para carregar
 README.md        Instalação e uso
 ```
