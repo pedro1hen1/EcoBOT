@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "minimum_chrome_version": "120",
+  "name": "EcoBot",
+  "version": "0.8.0",
+  "description": "Automação pela interface com calibração, sorteio por lance e histórico local.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "debugger"
+  ],
+  "host_permissions": [
+    "https://atlasserver-anbefqardqe8b0f5.brazilsouth-01.azurewebsites.net/*"
+  ],
+  "background": {
+    "service_worker": "worker.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://atlasserver-anbefqardqe8b0f5.brazilsouth-01.azurewebsites.net/ResiduoGo/public/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "128": "icons/icon-128.png",
+    "32": "icons/icon-32.png",
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png"
+  }
+}

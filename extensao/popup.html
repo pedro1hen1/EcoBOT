@@ -1,0 +1,28 @@
+<!doctype html><html lang="pt-BR"><meta charset="UTF-8"><title>EcoBot</title><link rel="stylesheet" href="popup.css">
+<body><header><div class="brand-mark" aria-hidden="true">E</div><div><h1>EcoBot <small>0.8.0</small></h1><p>Seu plano. Cada lance, uma nova combinação.</p></div></header>
+<section class="status-card"><p id="status" role="status" aria-live="polite">Conectando à extensão…</p><p id="log" role="alert" aria-live="assertive"></p><button id="open-extensions" hidden>Abrir extensões para atualizar</button></section>
+<p id="catalog-warning"></p><details id="catalog-details"><summary>Revisar catálogo atualizado</summary><pre id="catalog-items"></pre><button id="review-catalog" disabled>Revisei: aplicar catálogo atual</button></details>
+<form id="config"><h2><span class="step">1</span> Monte seu plano</h2><fieldset id="config-fields"><div class="grid">
+<label>Modo<select id="mode"><option value="sequencial">Sequencial</option><option value="fixo">Fixo — um resíduo</option></select></label>
+<label>Categoria<select id="category"><option value="todos">Todos</option><option>azul</option><option>cinza</option></select></label>
+<label class="wide">Resíduos <small id="selection-help">Ctrl para selecionar vários</small><select id="ids" multiple size="4"></select></label>
+<label>Partidas por resíduo<input id="repeats" type="number" min="1" max="10000" value="3"></label>
+<label id="sequence-label">Sequências completas<input id="sequences" type="number" min="1" max="10000" value="2"></label>
+<label id="order-label">Ordem<select id="order"><option value="group">Agrupada — AAA BBB</option><option value="rodizio">Rodízio — ABC ABC</option></select></label>
+<label>Velocidade (1 a 5)<input id="speed" type="number" min="1" max="5" value="3"></label>
+</div></fieldset><p id="timing-preview"></p></form>
+<p class="notice"><strong>Sorteio ativo em cada lance.</strong> A série usa pares com acerto observado; sem repetir o par anterior.</p><details id="aim-details"><summary>Sorteio a cada lance e calibração</summary>
+<p class="muted">A faixa define a exploração. A série usa somente pares com acerto observado neste resíduo e nível. Pontos também dependem da rapidez e da sequência.</p><h2><span class="step">2</span> Calibre seu lançamento</h2><p class="notice"><strong>Pontuação livre: dos acertos menores até a máxima.</strong> O sorteio inclui todos os pares aprovados na faixa, sem teto de pontos. Pausa no primeiro resultado sem acerto confirmado.</p>
+<label>Nível visível no jogo<input id="calibration-level" value="Nível Especialista"></label>
+<label><input id="vary-aim" type="checkbox" checked disabled> Sortear inteiros dentro das faixas abaixo</label>
+<div class="grid"><label>Força azul mínima (%)<input id="force-azul" type="number" min="10" max="100" value="32"></label><label>Força azul máxima (%)<input id="force-max-azul" type="number" min="10" max="100" value="38"></label>
+<label>Ângulo azul mínimo (°)<input id="spin-azul" type="number" min="-45" max="45" value="25"></label><label>Ângulo azul máximo (°)<input id="spin-max-azul" type="number" min="-45" max="45" value="34"></label>
+<label>Força cinza mínima (%)<input id="force-cinza" type="number" min="10" max="100" value="32"></label><label>Força cinza máxima (%)<input id="force-max-cinza" type="number" min="10" max="100" value="38"></label>
+<label>Ângulo cinza mínimo (°)<input id="spin-cinza" type="number" min="-45" max="45" value="-34"></label><label>Ângulo cinza máximo (°)<input id="spin-max-cinza" type="number" min="-45" max="45" value="-25"></label></div>
+<p id="aim-preview"></p><p>Calibração: escolha Fixo e um resíduo. Medir testa até 2 partidas, 1 lance em cada, e pausa no primeiro resultado sem acerto. Pode errar durante a medição.</p><button id="measure-aim">Medir 2 lances deste resíduo</button><h2>Pares com resultados observados</h2><p>Inclui medições prévias do projeto para Jornal e Casca de banana. Acertos locais e prévios aparecem separados. Erro local exclui o par. A faixa não comprova valores intermediários.</p><p>Δ HUD: diferença do placar visível antes/depois do lance. Feedback: pontos exibidos no resultado. — significa não medido; não é zero nem total da conta.</p><div id="aim-evidence"></div></details>
+<details><summary>Avançado: limite, exportação e diagnóstico</summary>
+<label>Limite opcional desta execução<input id="series-limit" type="number" min="1" max="10000" placeholder="Toda a fila selecionada"></label>
+<div class="actions"><button id="inspect">Atualizar catálogo</button><button id="prepare-assisted">Teste assistido de 1 lançamento</button><button id="export-attempts">Exportar tentativas CSV</button><button id="export-rounds">Exportar partidas CSV</button></div><p id="metrics"></p><p id="machine-state"></p>
+<label><input id="round-reviewed" type="checkbox"> Conferi o jogo. Arquivar pendência sem contar partida nem reenviar resultado.</label><button id="review-round">Arquivar pendência conferida</button></details>
+<footer><output id="total"></output><label><input id="series-permission" type="checkbox"> Confirmo que o jogo permite automação e autorizo estas partidas.</label><div class="actions"><button id="start-series" disabled>Iniciar</button><button id="pause">Pausar</button><button id="resume">Retomar</button><button id="stop">Parar</button></div></footer>
+<script src="popup.js"></script></body></html>

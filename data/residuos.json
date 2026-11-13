@@ -1,0 +1,242 @@
+[
+  {
+    "id": "jornal",
+    "nome": "Jornal",
+    "lixeira": "azul"
+  },
+  {
+    "id": "caixa-papelao",
+    "nome": "Caixa de papelão",
+    "lixeira": "azul"
+  },
+  {
+    "id": "revista",
+    "nome": "Revista",
+    "lixeira": "azul"
+  },
+  {
+    "id": "folha-sulfite",
+    "nome": "Folha de sulfite",
+    "lixeira": "azul"
+  },
+  {
+    "id": "embalagem-longa-vida",
+    "nome": "Caixa longa vida",
+    "lixeira": "azul"
+  },
+  {
+    "id": "garrafa-pet",
+    "nome": "Garrafa PET",
+    "lixeira": "azul"
+  },
+  {
+    "id": "frasco-shampoo",
+    "nome": "Frasco de shampoo",
+    "lixeira": "azul"
+  },
+  {
+    "id": "copo-plastico",
+    "nome": "Copo plástico",
+    "lixeira": "azul"
+  },
+  {
+    "id": "sacola-plastica",
+    "nome": "Sacola plástica",
+    "lixeira": "azul"
+  },
+  {
+    "id": "pote-margarina",
+    "nome": "Pote de margarina",
+    "lixeira": "azul"
+  },
+  {
+    "id": "bandeja-isopor",
+    "nome": "Bandeja de isopor",
+    "lixeira": "azul"
+  },
+  {
+    "id": "garrafa-vidro",
+    "nome": "Garrafa de vidro",
+    "lixeira": "azul"
+  },
+  {
+    "id": "pote-conserva",
+    "nome": "Pote de conserva",
+    "lixeira": "azul"
+  },
+  {
+    "id": "frasco-perfume",
+    "nome": "Frasco de perfume",
+    "lixeira": "azul"
+  },
+  {
+    "id": "lata-aluminio",
+    "nome": "Lata de alumínio",
+    "lixeira": "azul"
+  },
+  {
+    "id": "lata-aco",
+    "nome": "Lata de aço (conserva)",
+    "lixeira": "azul"
+  },
+  {
+    "id": "tampinha-metal",
+    "nome": "Tampinha metálica",
+    "lixeira": "azul"
+  },
+  {
+    "id": "papel-aluminio",
+    "nome": "Papel alumínio limpo",
+    "lixeira": "azul"
+  },
+  {
+    "id": "caixa-remedio",
+    "nome": "Caixa de remédio e bula",
+    "lixeira": "azul"
+  },
+  {
+    "id": "cartela-comprimido",
+    "nome": "Cartela de comprimidos",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "frasco-remedio",
+    "nome": "Frasco ou ampola de remédio",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "casca-banana",
+    "nome": "Casca de banana",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "borra-cafe",
+    "nome": "Borra de café",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "restos-comida",
+    "nome": "Restos de comida",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "papel-higienico-usado",
+    "nome": "Papel higiênico usado",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "guardanapo-sujo",
+    "nome": "Guardanapo engordurado ou molhado",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "caixa-pizza-engordurada",
+    "nome": "Caixa de pizza engordurada",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "fralda-descartavel",
+    "nome": "Fralda descartável",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "esponja-cozinha",
+    "nome": "Esponja de cozinha",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "bituca-cigarro",
+    "nome": "Bituca de cigarro",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "espelho-quebrado",
+    "nome": "Espelho quebrado",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "caneca-ceramica",
+    "nome": "Caneca de cerâmica quebrada",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "embalagem-bala-chiclete",
+    "nome": "Embalagem de bala ou chiclete",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "capsula-cafe",
+    "nome": "Cápsula de café",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "sache-sal-acucar",
+    "nome": "Sachê de sal ou açúcar",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "embalagem-suja-comida",
+    "nome": "Embalagem com resto de comida",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "adesivo",
+    "nome": "Adesivo ou etiqueta",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "fita-isolante",
+    "nome": "Fita isolante",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "fita-adesiva",
+    "nome": "Fita adesiva",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "plastico-bolha",
+    "nome": "Plástico bolha",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "escova-dente",
+    "nome": "Escova de dente",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "caneta",
+    "nome": "Caneta",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "objeto-plastico-misto",
+    "nome": "Objeto plástico misto",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "embalagem-laminada",
+    "nome": "Embalagem laminada",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "algodao",
+    "nome": "Algodão ou cotonete usado",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "chiclete-bala",
+    "nome": "Chiclete e bala",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "palito-madeira-plastico",
+    "nome": "Palito de madeira ou plástico",
+    "lixeira": "cinza"
+  },
+  {
+    "id": "lixa-unha",
+    "nome": "Lixa de unha",
+    "lixeira": "cinza"
+  }
+]
