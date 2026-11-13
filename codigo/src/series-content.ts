@@ -36,11 +36,12 @@ export async function driveSeries():Promise<void>{
  for(let i=0;i<3;i++){
  await wait(document,()=>{try{requireReady(document);return true;}catch{return false;}},signal);
  const candidate={...calibration[state.category as 'azul'|'cinza']!,margin:0};let id='';let next='pause';let before:number|undefined;
+ const adapter=new DebuggerThrowAdapter(()=>id,'series-input');
  await runAssisted(document,candidate,{
  reserve:async()=>{before=hudPoints(document);const r=await send('series-reserve',{level:document.querySelector('#hud-nivel')?.textContent?.trim()});if(!r.id)throw Error('Reserva bloqueada');id=r.id;Object.assign(candidate,r.candidate);return id;},
- adapter:new DebuggerThrowAdapter(()=>id,'series-input'),
- finish:async(attemptId,outcome)=>{const r=await send('series-finish',{id:attemptId,outcome,score:readScore(document,before),ended:document.querySelector('#hud-tentativas')?.textContent?.trim()==='Rodada encerrada'});next=r.action;}
- },signal);
+ adapter,
+ finish:async(attemptId,outcome)=>{const r=await send('series-finish',{id:attemptId,outcome,inputFailure:adapter.failure,score:readScore(document,before),ended:document.querySelector('#hud-tentativas')?.textContent?.trim()==='Rodada encerrada'});next=r.action;}
+ },signal,calibration.background?30000:15000);
  signal.throwIfAborted();
  if(next==='retry'){
  const retry=document.querySelector<HTMLButtonElement>('#btn-proximo');if(!retry||retry.hidden||retry.disabled)throw Error('Nova tentativa indisponível');retry.click();continue;

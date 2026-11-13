@@ -12,7 +12,7 @@ let items:Item[]=catalog,snapshot:CatalogReview|undefined,compatible=false,busy=
 let latest:ExecutionCheckpoint|undefined,previewTimer:ReturnType<typeof setTimeout>|undefined,revision=0;
 let readiness:{readyItems:number;totalItems:number;pendingThisRun:number;runTotal:number}|undefined;
 function error(value:unknown){const text=value instanceof Error?value.message:String(value);el('log').textContent=text;el('action-feedback').textContent=text;if(!running&&!latest?.uncertain)el('status').textContent='Ação pendente · confira o aviso';el('status').scrollIntoView({block:'nearest'});}
-function controls(){const disabled=!compatible||busy||running||!menuReady||!!latest?.uncertain||!!latest?.execution?.active;el<HTMLButtonElement>('measure-aim').disabled=disabled;el<HTMLButtonElement>('start-series').disabled=disabled||(!input('auto-calibrate').checked&&(!readiness||readiness.pendingThisRun>0));}
+function controls(){const disabled=!compatible||busy||running||!menuReady||!!latest?.uncertain||!!latest?.execution?.active;el<HTMLButtonElement>('measure-aim').disabled=disabled;el<HTMLButtonElement>('start-series').disabled=disabled||(!input('auto-calibrate').checked&&(!readiness||readiness.pendingThisRun>0));for(const id of ['background-enabled','auto-calibrate'])input(id).disabled=!compatible||busy||running;}
 function schedulePreview(){if(loading||!compatible||running)return;clearTimeout(previewTimer);const request=++revision;previewTimer=setTimeout(()=>void (async()=>{try{
  const limit=input('series-limit').value;const r=await rpc('series-preview',{config:config(),calibration:calibration(),...(limit?{limit:Number(limit)}:{})});if(request!==revision)return;readiness=r;
  el('readiness').textContent=`${r.readyItems}/${r.totalItems} resíduos com pares observados. `+(r.pendingThisRun?input('auto-calibrate').checked?`${r.pendingThisRun} pendentes serão medidos durante as ${r.runTotal} partidas desta execução. Pode haver erro; pausa no primeiro resultado sem acerto.`:'Ative a medição automática ou selecione apenas resíduos já calibrados.':'Esta execução usa pares já observados.');controls();
@@ -39,7 +39,7 @@ function render(cp:ExecutionCheckpoint){
  latest=cp;
  running=cp.execution?.status==='RUNNING';el<HTMLFieldSetElement>('config-fields').disabled=running;
  el('machine-state').textContent=cp.state+' · '+cp.cursor+'/'+cp.queue.length+' · '+cp.message;
- el('status').textContent=running?'Jogando · '+cp.cursor+'/'+cp.queue.length+' partidas concluídas':cp.uncertain?'Pausado: confira o jogo e a pendência':cp.execution?.status==='PAUSED'?'Pausado · '+cp.cursor+'/'+cp.queue.length+' partidas concluídas':cp.execution?.status==='COMPLETED'?'Execução concluída · '+cp.cursor+'/'+cp.queue.length:menuReady?'Menu conectado · configure e inicie':'Abra o menu dos resíduos para iniciar';
+ el('status').textContent=running?'Jogando'+(cp.execution?.calibration.background?' em segundo plano':'')+' · '+cp.cursor+'/'+cp.queue.length+' partidas concluídas':cp.uncertain?'Pausado: confira o jogo e a pendência':cp.execution?.status==='PAUSED'?'Pausado · '+cp.cursor+'/'+cp.queue.length+' partidas concluídas':cp.execution?.status==='COMPLETED'?'Execução concluída · '+cp.cursor+'/'+cp.queue.length:menuReady?'Menu conectado · configure e inicie':'Abra o menu dos resíduos para iniciar';
  if(cp.execution||cp.uncertain)el('log').textContent=cp.message;
  el<HTMLButtonElement>('pause').disabled=!running;
  el<HTMLButtonElement>('resume').disabled=cp.execution?.status!=='PAUSED'||cp.uncertain;
@@ -69,7 +69,7 @@ async function inspect(){
 }
 async function review(){if(!snapshot)throw Error('Atualize o catálogo primeiro.');snapshot=(await rpc('review-catalog',{inspectedAt:snapshot.inspectedAt})).catalogReview;renderCatalog();}
 function calibration():Calibration{
- const c:Calibration={level:input('calibration-level').value.trim(),observedOnly:true,pauseOnMiss:true,learnMissing:input('auto-calibrate').checked};
+ const c:Calibration={level:input('calibration-level').value.trim(),background:input('background-enabled').checked,observedOnly:true,pauseOnMiss:true,learnMissing:input('auto-calibrate').checked};
  for(const bin of ['azul','cinza'] as const)if(input('force-'+bin).value){
  c[bin]={force:input('force-'+bin).valueAsNumber/100,spin:input('spin-'+bin).valueAsNumber*Math.PI/180,...(input('vary-aim').checked?{range:{forceMin:input('force-'+bin).valueAsNumber,forceMax:input('force-max-'+bin).valueAsNumber,angleMin:input('spin-'+bin).valueAsNumber,angleMax:input('spin-max-'+bin).valueAsNumber}}:{})};
  validateProfile(c[bin]!);
@@ -90,6 +90,7 @@ el('config').addEventListener('input',changed);
 el('config').addEventListener('submit',e=>{e.preventDefault();void start(e.isTrusted);});
 el('aim-details').addEventListener('input',changed);
 el('auto-calibrate').addEventListener('input',changed);
+el('background-enabled').addEventListener('input',changed);
 input('series-limit').addEventListener('input',changed);
 el('review-catalog').addEventListener('click',()=>void act(review));
 el('inspect').addEventListener('click',()=>void act(async()=>{await inspect();}));
@@ -127,6 +128,7 @@ async function load(){
  const s=aimSettings as {calibration:Calibration;vary:boolean;limit:string}|undefined;
  if(s?.calibration){input('calibration-level').value=s.calibration.level;input('series-limit').value=s.limit;
  input('auto-calibrate').checked=s.calibration.learnMissing!==false;
+ input('background-enabled').checked=s.calibration.background!==false;
  for(const bin of ['azul','cinza'] as const){const p=s.calibration[bin];if(p?.range&&(p.range.forceMin!==p.range.forceMax||p.range.angleMin!==p.range.angleMax)){input('force-'+bin).value=String(p.range.forceMin);input('force-max-'+bin).value=String(p.range.forceMax);input('spin-'+bin).value=String(p.range.angleMin);input('spin-max-'+bin).value=String(p.range.angleMax);}}}
  preview();renderCatalog();await metrics();await evidence();
  try{await inspect();}catch(e){menuReady=false;error(e);}loading=false;preview();controls();

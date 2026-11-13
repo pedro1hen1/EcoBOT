@@ -3,7 +3,7 @@
 </p>
 <h1 align="center">EcoBot</h1>
 <p align="center">Seu plano. Cada lance, uma nova combinação.</p>
-<p align="center"><kbd>Chrome</kbd> <kbd>Edge</kbd> <kbd>Manifest V3</kbd> <kbd>0.9.0</kbd></p>
+<p align="center"><kbd>Chrome</kbd> <kbd>Edge</kbd> <kbd>Manifest V3</kbd> <kbd>0.10.2</kbd></p>
 <p align="center">
   <a href="#instalar">Instalar</a> · <a href="#primeira-partida">Primeira partida</a> · <a href="#configurar-a-serie">Configurar</a> · <a href="#duvidas-frequentes">Dúvidas</a>
 </p>
@@ -53,6 +53,23 @@ A calibração incluída foi medida no **Nível Especialista**, em desktop, sem 
 
 O total aparece antes de iniciar. Uma tentativa de arremesso não é uma partida.
 
+### Jogar enquanto usa outras abas
+
+1. Deixe **Continuar ao trocar de aba** marcado no painel principal.
+2. No menu dos resíduos, configure o plano e clique em **Iniciar**.
+3. Quando aparecer **Jogando em segundo plano**, pode trocar de aba. O popup pode ser fechado.
+4. Para interromper, abra o EcoBot e use **Pausar** ou **Parar**.
+
+O EcoBot mantém somente a aba autorizada do jogo ativa por depuração e envia o mouse nativo para ela. Não traz o jogo à frente nem move o cursor do Windows. O aviso de depuração permanece durante a execução; cancelar esse aviso interrompe a conexão e pausa a automação. O modo é desligado ao parar, pausar, concluir ou sair do jogo. A opção pode ser desmarcada antes de iniciar uma nova execução.
+
+Mantenha o navegador aberto e visível, o computador acordado e a sessão conectada. Fechar o navegador não mantém a execução; o checkpoint fica preservado para conferência. No Windows, uma janela totalmente encoberta por outros programas também pode ter a renderização suspensa, mesmo sem estar minimizada. A troca de abas foi validada; minimização, janela totalmente encoberta, suspensão do computador e execução longa não foram validadas. Não abra DevTools na aba do jogo durante a execução: outra conexão pode encerrar a depuração da extensão.
+
+**Validação real:** no Chromium de testes, uma partida e depois uma sequência de duas partidas de Jornal, Nível Especialista, concluíram com outra aba ativa. A própria extensão selecionou os cards, arremessou, leu o resultado e confirmou o retorno ao menu; o agente não enviou os gestos. Pontos medidos: **32%/34° = +240**, **37%/27° = +294**, **33%/33° = +250**. A outra aba não recebeu cliques. Isso valida esse cenário curto; os 48 resíduos, 288 partidas e Edge real não foram validados por esse ensaio.
+
+**Pontuação:** em segundo plano, esses lances levaram aproximadamente 13–14,5 segundos até o feedback e receberam zero bônus de rapidez. Não há garantia de 280 pontos mínimos ou erro zero. A extensão observa o feedback por até 30 segundos nesse modo e pausa se o resultado continuar incerto; não avança a fila pelo tempo decorrido.
+
+O recurso usa [Emulation pelo debugger do Chrome](https://developer.chrome.com/docs/extensions/reference/api/debugger). As [restrições de abas em segundo plano](https://developer.chrome.com/blog/background_tabs/) são o motivo para manter a conexão durante a rodada, além do arraste.
+
 ### Controles
 
 | Botão | Ação |
@@ -68,7 +85,7 @@ A série pausa no primeiro resultado sem acerto confirmado. Confira o jogo antes
 
 Cada lance sorteia **força, ângulo e ritmo**. O par completo de força/ângulo não se repete consecutivamente; um campo isolado pode repetir. Não há teto de pontos: entram tanto os pares de pontuação menor quanto os de pontuação maior.
 
-A série usa somente pares com **acerto observado e nenhum erro registrado**, para o mesmo resíduo, categoria, nível e faixa configurada. Inclui calibração prévia de **Jornal** e **Casca de banana**, com acertos locais e prévios separados na tabela. Essas medições não criam partidas fictícias no histórico. Um erro local exclui o par.
+Para resíduos já calibrados, o sorteio usa pares com **acerto observado e nenhum erro registrado**, para o mesmo resíduo, categoria, nível e faixa configurada. Inclui calibração prévia de **Jornal** e **Casca de banana**, com acertos locais e prévios separados na tabela. Essas medições não criam partidas fictícias no histórico. Um erro local exclui o par.
 
 **Os outros 46 resíduos precisam de medição própria.** Com **Medir automaticamente os resíduos pendentes** ativado, o Iniciar mede nas próprias partidas selecionadas, sem adicionar partidas. Após dois pares aprovados para o item, usa o sorteio entre pares observados. A medição pode errar e pausa no primeiro resultado sem acerto. Desative essa opção se desejar somente pares já medidos. A faixa não aprova automaticamente todas as combinações intermediárias. Acerto observado não é garantia de erro zero.
 
@@ -85,7 +102,7 @@ A medição pode errar: ela explora combinações novas. Com a medição automá
 
 ### Faixas e pontos
 
-Faixas padrão de exploração: **32–38%** de força; azul **25–34°** e cinza **−34 a −25°**. A série sorteia apenas os pares observados dentro delas.
+Faixas padrão de exploração: **32–38%** de força; azul **25–34°** e cinza **−34 a −25°**. Após a calibração, o sorteio usa os pares observados dentro delas. A medição automática pode explorar pares ainda não medidos.
 
 Exemplos reais de Jornal, Nível Especialista, sequência 2×:
 
@@ -107,9 +124,9 @@ No ritmo padrão **3/5**, a espera é sorteada entre **0,8 e 1,8 segundo**. O ar
 
 ## Registros e privacidade
 
-Em **Avançado**, exporte tentativas ou partidas em CSV. Cada tentativa registra força, ângulo, ritmo e pontuação disponível. **Δ HUD** é a diferença do placar antes/depois; **Feedback** é o Total exibido no resultado. **—** significa não medido, nunca zero presumido.
+Em **Avançado**, exporte tentativas ou partidas em CSV. Cada tentativa registra força, ângulo, ritmo e pontuação disponível. Quando uma entrada falha, um diagnóstico local registra apenas a etapa e os tempos do gesto. **Δ HUD** é a diferença do placar antes/depois; **Feedback** é o Total exibido no resultado. **—** significa não medido, nunca zero presumido.
 
-Os dados ficam no armazenamento local da extensão. O EcoBot não lê senhas, cookies, tokens, payloads do jogo ou perfis pessoais. Usa a permissão `debugger` para entrada nativa de mouse, após conferir aba, rota e documento. O próprio jogo faz suas requisições normais; o EcoBot não envia pontuações diretamente à API nem clica em reenviar resultado incerto.
+Os dados ficam no armazenamento local da extensão. O EcoBot não lê senhas, cookies, tokens, payloads do jogo ou perfis pessoais. Usa a permissão `debugger` para entrada nativa de mouse e, quando habilitado, para manter a aba do jogo ativa em segundo plano, após conferir aba, rota e documento. O próprio jogo faz suas requisições normais; o EcoBot não envia pontuações diretamente à API nem clica em reenviar resultado incerto.
 
 <a id="duvidas-frequentes"></a>
 ## Dúvidas frequentes

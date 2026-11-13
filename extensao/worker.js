@@ -409,7 +409,7 @@
   // package.json
   var package_default = {
     name: "ecobot",
-    version: "0.9.0",
+    version: "0.10.2",
     private: true,
     type: "module",
     scripts: {
@@ -425,12 +425,72 @@
 
   // src/version.ts
   var BUILD_VERSION = package_default.version;
-  var PROTOCOL = 9;
+  var PROTOCOL = 10;
   function assertBuild(reply) {
     if (reply?.buildVersion !== BUILD_VERSION) throw Error(`Vers\xF5es desencontradas. Esta tela \xE9 ${BUILD_VERSION}, mas o componente carregado \xE9 ${reply?.buildVersion ?? "antigo"}. Recarregue o EcoBot na p\xE1gina de extens\xF5es e depois recarregue a aba do jogo.`);
   }
 
+  // src/background.ts
+  var sessions = /* @__PURE__ */ new Set();
+  var gestures = /* @__PURE__ */ new Map();
+  function holdBackgroundGesture(tabId) {
+    let finish2;
+    const done = new Promise((resolve) => {
+      finish2 = resolve;
+    });
+    gestures.set(tabId, { done, finish: finish2 });
+    return () => {
+      gestures.delete(tabId);
+      finish2();
+    };
+  }
+  function gameRoute(url) {
+    if (!allowed(url)) return false;
+    const path = new URL(url).pathname;
+    return path === "/ResiduoGo/public/index.php" || path === "/ResiduoGo/public/index.php/ar";
+  }
+  function backgroundAttached(tabId) {
+    return sessions.has(tabId);
+  }
+  function backgroundDetached(tabId) {
+    return sessions.delete(tabId);
+  }
+  async function keepGameActive(tabId, documentId) {
+    const tab = await chrome.tabs.get(tabId);
+    if (!tab.url || !gameRoute(tab.url)) throw Error("Segundo plano restrito \xE0 aba do jogo");
+    const alive = await chrome.tabs.sendMessage(tabId, { type: "probe-document" }, { documentId });
+    assertBuild(alive);
+    if (!alive?.ok) throw Error("Documento indispon\xEDvel para segundo plano");
+    if (!await chrome.permissions.contains({ permissions: ["debugger"] })) throw Error("Permiss\xE3o debugger n\xE3o concedida");
+    if (!sessions.has(tabId)) {
+      await chrome.debugger.attach({ tabId }, "1.3");
+      sessions.add(tabId);
+    }
+    try {
+      await chrome.debugger.sendCommand({ tabId }, "Emulation.setFocusEmulationEnabled", { enabled: true });
+    } catch {
+      await releaseGame(tabId);
+      throw Error("Este navegador n\xE3o permitiu manter o jogo ativo em segundo plano");
+    }
+  }
+  async function releaseGame(tabId) {
+    await gestures.get(tabId)?.done;
+    if (!sessions.delete(tabId)) return;
+    try {
+      await chrome.debugger.sendCommand({ tabId }, "Emulation.setFocusEmulationEnabled", { enabled: false });
+    } finally {
+      await chrome.debugger.detach({ tabId }).catch(() => {
+      });
+    }
+  }
+
   // src/debugger-input.ts
+  var InputInterruption = class extends Error {
+    constructor(stage, timing) {
+      super("Entrada nativa interrompida na etapa: " + stage);
+      this.timing = timing;
+    }
+  };
   var controls = /* @__PURE__ */ new Map();
   function cancelDebugger(tabId) {
     controls.get(tabId)?.abort();
@@ -448,8 +508,12 @@
     const abort = new AbortController();
     controls.set(tabId, abort);
     const target = { tabId };
-    let attached = false, pressed = false, released = false;
+    let attached = false, shared = false, pressed = false, released = false;
     let probe;
+    let releaseLease;
+    let stage = "verificar documento";
+    const began = performance.now(), timing = [];
+    const mark = () => timing.push({ stage, ms: Math.round(performance.now() - began) });
     const check = async () => {
       abort.signal.throwIfAborted();
       const tab = await chrome.tabs.get(tabId);
@@ -462,8 +526,23 @@
     const command = async (method, params) => {
       await check();
       await chrome.debugger.sendCommand(target, method, params);
+      mark();
       abort.signal.throwIfAborted();
     };
+    const delay = (ms) => new Promise((resolve, reject) => {
+      const done = () => {
+        abort.signal.removeEventListener("abort", cancel);
+        resolve();
+      };
+      const timer2 = setTimeout(done, ms);
+      const cancel = () => {
+        clearTimeout(timer2);
+        abort.signal.removeEventListener("abort", cancel);
+        reject(Error("Entrada cancelada"));
+      };
+      abort.signal.addEventListener("abort", cancel, { once: true });
+      if (abort.signal.aborted) cancel();
+    });
     const detach = (source) => {
       if (source.tabId === tabId) abort.abort();
     };
@@ -471,38 +550,41 @@
     const timer = setTimeout(() => abort.abort(), 8e3);
     try {
       await check();
-      if (waitMs) await new Promise((resolve, reject) => {
-        const done = () => {
-          abort.signal.removeEventListener("abort", cancel);
-          resolve();
-        };
-        const delay = setTimeout(done, waitMs);
-        const cancel = () => {
-          clearTimeout(delay);
-          reject(Error("Espera cancelada"));
-        };
-        abort.signal.addEventListener("abort", cancel, { once: true });
-        if (abort.signal.aborted) cancel();
-      });
+      stage = "aguardar ritmo";
+      if (waitMs) await delay(waitMs);
       await check();
+      stage = "conectar entrada";
       if (!await chrome.permissions.contains({ permissions: ["debugger"] })) throw Error("Permiss\xE3o debugger n\xE3o concedida pelo navegador");
-      await chrome.debugger.attach(target, "1.3");
+      shared = backgroundAttached(tabId);
+      if (!shared) await chrome.debugger.attach(target, "1.3");
       attached = true;
+      if (shared) await keepGameActive(tabId, documentId);
+      if (shared) releaseLease = holdBackgroundGesture(tabId);
       await check();
+      stage = "medir canvas";
       probe = await chrome.tabs.sendMessage(tabId, { type: "probe-gesture", candidate: { force: attempt.force, spin: attempt.spin, margin: 0 } }, { documentId });
       validateProbe(probe);
       abort.signal.throwIfAborted();
+      mark();
+      timing.push({ stage: probe.hidden ? "canvas oculto" : "canvas vis\xEDvel", ms: Math.round(performance.now() - began) });
       const { start, end } = probe;
+      stage = "posicionar mouse";
       await command("Input.dispatchMouseEvent", { type: "mouseMoved", x: start.x, y: start.y, buttons: 0 });
+      stage = "pressionar";
       pressed = true;
       await command("Input.dispatchMouseEvent", { type: "mousePressed", x: start.x, y: start.y, button: "left", buttons: 1, clickCount: 1 });
-      for (let i = 1; i <= 12; i++) {
-        await new Promise((resolve) => setTimeout(resolve, dragMs / 12));
-        await command("Input.dispatchMouseEvent", { type: "mouseMoved", x: start.x + (end.x - start.x) * i / 12, y: start.y + (end.y - start.y) * i / 12, buttons: 1 });
+      stage = "arrastar";
+      await delay(dragMs);
+      for (let i = 1; i <= 3; i++) {
+        await command("Input.dispatchMouseEvent", { type: "mouseMoved", x: start.x + (end.x - start.x) * i / 3, y: start.y + (end.y - start.y) * i / 3, buttons: 1 });
       }
       await check();
       released = true;
+      stage = "soltar";
       await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type: "mouseReleased", x: end.x, y: end.y, button: "left", buttons: 0, clickCount: 1 });
+    } catch {
+      mark();
+      throw new InputInterruption(stage, timing);
     } finally {
       clearTimeout(timer);
       let sameDocument = false;
@@ -522,8 +604,9 @@
         if (probe) await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", { type: "mouseReleased", x: probe.start.x, y: probe.start.y, button: "left", buttons: 0 }).catch(() => {
         });
       }
-      if (attached) await chrome.debugger.detach(target).catch(() => {
+      if (attached && !shared) await chrome.debugger.detach(target).catch(() => {
       });
+      releaseLease?.();
       chrome.debugger.onDetach.removeListener(detach);
       controls.delete(tabId);
     }
@@ -735,7 +818,11 @@
     if (message.type === "series-review") {
       if (sender.url !== chrome.runtime.getURL("popup.html") || message.reviewed !== true || !cp.uncertain && !run?.active || run?.active?.id !== message.id || run?.status === "RUNNING") throw Error("Pause e confira a pend\xEAncia atual antes de arquivar");
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab?.id || !tab.url || !allowed(tab.url) || new URL(tab.url).pathname !== "/ResiduoGo/public/index.php" || run && run.tabId !== tab.id) throw Error("Volte ao menu dos res\xEDduos na aba desta execu\xE7\xE3o antes de encerrar a pend\xEAncia");
+      if (!tab?.id || !tab.url || !allowed(tab.url) || new URL(tab.url).pathname !== "/ResiduoGo/public/index.php") throw Error("Volte ao menu dos res\xEDduos antes de encerrar a pend\xEAncia");
+      if (run && run.tabId !== tab.id) {
+        const original = await chrome.tabs.get(run.tabId).catch(() => void 0);
+        if (original) throw Error("Confira a aba original da execu\xE7\xE3o e volte ao menu nela antes de encerrar a pend\xEAncia");
+      }
       if (run?.active) {
         const archived = { ...pauseRound(run.active, "Arquivada manualmente ap\xF3s confer\xEAncia; partida n\xE3o contabilizada"), reviewedAt: Date.now() };
         const stored = await chrome.storage.local.get("roundHistory");
@@ -745,6 +832,8 @@
       }
       if (run) {
         cancelDebugger(run.tabId);
+        await releaseGame(run.tabId).catch(() => {
+        });
         run.active = void 0;
         run.status = "STOPPED";
       }
@@ -770,14 +859,16 @@
       cp.uncertain = !!run.active;
       cp.message = reason;
       await save();
+      await releaseGame(run.tabId).catch(() => {
+      });
       reply({ ok: true, action: "pause", cp });
     };
-    if (message.type === "series-fault") {
-      await pause("Execu\xE7\xE3o interrompida; confira a rodada antes de retomar");
-      return;
-    }
     if (run.status !== "RUNNING") {
       reply({ ok: true, action: "pause" });
+      return;
+    }
+    if (message.type === "series-fault") {
+      await pause("Execu\xE7\xE3o interrompida; confira a rodada antes de retomar");
       return;
     }
     if (message.type === "series-document") {
@@ -804,6 +895,8 @@
           cp.previous = "HOME";
           cp.message = `Execu\xE7\xE3o conclu\xEDda: ${run.completed} partidas confirmadas. Fila preservada.`;
           await save();
+          await releaseGame(run.tabId).catch(() => {
+          });
           reply({ ok: true, action: "pause", cp });
           return;
         }
@@ -822,6 +915,14 @@
           await pause("Categoria sem calibra\xE7\xE3o; nenhuma nova partida aberta");
           return;
         }
+        if (run.calibration.background) {
+          try {
+            await keepGameActive(run.tabId, documentId);
+          } catch {
+            await pause("Segundo plano indispon\xEDvel. Confira a permiss\xE3o e o aviso de depura\xE7\xE3o; nenhum novo card aberto.");
+            return;
+          }
+        }
         run.active = openRound(run.id, crypto.randomUUID(), task, run.tabId, Date.now());
         cp.state = "OPENING";
         await save();
@@ -838,6 +939,14 @@
         if (oldDocument === documentId) {
           reply({ ok: true, action: "idle" });
           return;
+        }
+        if (run.calibration.background) {
+          try {
+            await keepGameActive(run.tabId, documentId);
+          } catch {
+            await pause("Segundo plano interrompido. Confira a aba e a permiss\xE3o antes de continuar.");
+            return;
+          }
         }
         cp.state = "READY";
         await save();
@@ -889,13 +998,21 @@
       const candidate = { force: attempt.force, spin: attempt.spin };
       attempt.inputClaimedAt = Date.now();
       await save();
-      void debuggerThrow({ id: attempt.id, tabId: run.tabId, documentId, itemId: round.task.item.id, ...candidate, ...attempt.pacing, startedAt: attempt.startedAt }).then(() => reply({ ok: true }), () => reply({ ok: false, error: "Entrada interrompida; n\xE3o repetir" }));
+      void debuggerThrow({ id: attempt.id, tabId: run.tabId, documentId, itemId: round.task.item.id, ...candidate, ...attempt.pacing, startedAt: attempt.startedAt }).then(() => reply({ ok: true }), async (error) => {
+        if (error instanceof InputInterruption) await chrome.storage.local.set({ inputDiagnostic: { id: attempt.id, timing: error.timing } }).catch(() => {
+        });
+        reply({ ok: false, error: error instanceof Error ? error.message : "Entrada interrompida; n\xE3o repetir" });
+      });
       return;
     }
     if (message.type === "series-finish") {
       const alreadyFinished = round.attempts.at(-1)?.finishedAt !== void 0;
       run.active = observeThrow(round, documentId, message.id, message.outcome, message.ended === true, Date.now());
       if (!alreadyFinished) run.active.attempts.at(-1).score = sanitizeScore(message.score);
+      if (message.outcome === "gesture-error" && /^Entrada nativa interrompida na etapa: (verificar documento|aguardar ritmo|conectar entrada|medir canvas|posicionar mouse|pressionar|arrastar|soltar)$/.test(message.inputFailure ?? "")) {
+        await pause(message.inputFailure + ". Confira o jogo e encerre a pend\xEAncia antes de um novo in\xEDcio.");
+        return;
+      }
       if ((run.calibration.measuring || run.calibration.pauseOnMiss) && run.active.attempts.at(-1)?.outcome !== "success") {
         await pause("Lance sem acerto confirmado. Execu\xE7\xE3o pausada; confira o jogo. O par com erro ser\xE1 exclu\xEDdo ap\xF3s arquivar a pend\xEAncia.");
         return;
@@ -982,6 +1099,8 @@
           cancelDebugger(cp.execution.tabId);
           void chrome.tabs.sendMessage(cp.execution.tabId, { type: "cancel-assisted" }).catch(() => {
           });
+          await releaseGame(cp.execution.tabId).catch(() => {
+          });
         }
         const store = await assistedStore();
         await Promise.all(Object.values(store.active).map((a) => {
@@ -1053,8 +1172,41 @@
   chrome.runtime.onStartup.addListener(() => {
     serial = serial.catch(() => {
     }).then(async () => {
-      const cp = await readCheckpoint();
-      await chrome.storage.local.set({ checkpoint: recover(cp) });
+      const cp = recover(await readCheckpoint());
+      if (cp.execution?.status === "RUNNING") {
+        cp.execution.status = "PAUSED";
+        if (cp.execution.active) cp.execution.active = pauseRound(cp.execution.active, "Navegador reiniciado");
+        cp.state = "PAUSED";
+        cp.uncertain = cp.uncertain || !!cp.execution.active;
+        cp.message = "Navegador reiniciado. Confira o jogo e a pend\xEAncia antes de continuar.";
+      }
+      await chrome.storage.local.set({ checkpoint: cp });
     });
   });
+  function backgroundLost(tabId, reason) {
+    cancelDebugger(tabId);
+    serial = serial.catch(() => {
+    }).then(async () => {
+      const cp = await readCheckpoint();
+      const run = cp.execution;
+      if (!run || run.tabId !== tabId || run.status !== "RUNNING") return;
+      run.status = "PAUSED";
+      if (run.active) run.active = pauseRound(run.active, reason);
+      cp.state = "PAUSED";
+      cp.uncertain = !!run.active;
+      cp.message = reason;
+      await chrome.storage.local.set({ checkpoint: cp });
+      await releaseGame(tabId).catch(() => {
+      });
+      void chrome.tabs.sendMessage(tabId, { type: "cancel-assisted" }).catch(() => {
+      });
+    });
+  }
+  chrome.debugger.onDetach.addListener((source) => {
+    if (source.tabId !== void 0 && backgroundDetached(source.tabId)) backgroundLost(source.tabId, "Conex\xE3o de segundo plano encerrada. Execu\xE7\xE3o pausada; confira a rodada antes de continuar.");
+  });
+  chrome.tabs.onUpdated.addListener((tabId, change, tab) => {
+    if (change.url && !gameRoute(change.url) || change.status === "complete" && (!tab.url || !gameRoute(tab.url))) backgroundLost(tabId, "A aba saiu do jogo. Execu\xE7\xE3o pausada; confira a sess\xE3o e a rodada pendente.");
+  });
+  chrome.tabs.onRemoved.addListener((tabId) => backgroundLost(tabId, "A aba do jogo foi fechada. Checkpoint preservado para confer\xEAncia."));
 })();

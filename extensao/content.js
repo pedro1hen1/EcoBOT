@@ -516,7 +516,7 @@
   // package.json
   var package_default = {
     name: "ecobot",
-    version: "0.9.0",
+    version: "0.10.2",
     private: true,
     type: "module",
     scripts: {
@@ -796,6 +796,7 @@
         let id = "";
         let next = "pause";
         let before;
+        const adapter = new DebuggerThrowAdapter(() => id, "series-input");
         await runAssisted(document, candidate, {
           reserve: async () => {
             before = hudPoints(document);
@@ -805,12 +806,12 @@
             Object.assign(candidate, r.candidate);
             return id;
           },
-          adapter: new DebuggerThrowAdapter(() => id, "series-input"),
+          adapter,
           finish: async (attemptId, outcome) => {
-            const r = await send2("series-finish", { id: attemptId, outcome, score: readScore(document, before), ended: document.querySelector("#hud-tentativas")?.textContent?.trim() === "Rodada encerrada" });
+            const r = await send2("series-finish", { id: attemptId, outcome, inputFailure: adapter.failure, score: readScore(document, before), ended: document.querySelector("#hud-tentativas")?.textContent?.trim() === "Rodada encerrada" });
             next = r.action;
           }
-        }, signal);
+        }, signal, calibration.background ? 3e4 : 15e3);
         signal.throwIfAborted();
         if (next === "retry") {
           const retry = document.querySelector("#btn-proximo");
@@ -852,7 +853,7 @@
         requireReady(document);
         const canvas = document.querySelector("canvas#cena");
         if (!canvas) throw Error("Canvas ausente");
-        reply({ ok: true, ...endpoints(canvas, message.candidate), width: innerWidth, height: innerHeight });
+        reply({ ok: true, ...endpoints(canvas, message.candidate), hidden: document.hidden, width: innerWidth, height: innerHeight });
       } catch {
         reply({ ok: false });
       }

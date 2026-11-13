@@ -288,7 +288,7 @@
   // package.json
   var package_default = {
     name: "ecobot",
-    version: "0.9.0",
+    version: "0.10.2",
     private: true,
     type: "module",
     scripts: {
@@ -349,6 +349,7 @@
     const disabled = !compatible || busy || running || !menuReady || !!latest?.uncertain || !!latest?.execution?.active;
     el("measure-aim").disabled = disabled;
     el("start-series").disabled = disabled || !input("auto-calibrate").checked && (!readiness || readiness.pendingThisRun > 0);
+    for (const id of ["background-enabled", "auto-calibrate"]) input(id).disabled = !compatible || busy || running;
   }
   function schedulePreview() {
     if (loading || !compatible || running) return;
@@ -424,7 +425,7 @@
     running = cp.execution?.status === "RUNNING";
     el("config-fields").disabled = running;
     el("machine-state").textContent = cp.state + " \xB7 " + cp.cursor + "/" + cp.queue.length + " \xB7 " + cp.message;
-    el("status").textContent = running ? "Jogando \xB7 " + cp.cursor + "/" + cp.queue.length + " partidas conclu\xEDdas" : cp.uncertain ? "Pausado: confira o jogo e a pend\xEAncia" : cp.execution?.status === "PAUSED" ? "Pausado \xB7 " + cp.cursor + "/" + cp.queue.length + " partidas conclu\xEDdas" : cp.execution?.status === "COMPLETED" ? "Execu\xE7\xE3o conclu\xEDda \xB7 " + cp.cursor + "/" + cp.queue.length : menuReady ? "Menu conectado \xB7 configure e inicie" : "Abra o menu dos res\xEDduos para iniciar";
+    el("status").textContent = running ? "Jogando" + (cp.execution?.calibration.background ? " em segundo plano" : "") + " \xB7 " + cp.cursor + "/" + cp.queue.length + " partidas conclu\xEDdas" : cp.uncertain ? "Pausado: confira o jogo e a pend\xEAncia" : cp.execution?.status === "PAUSED" ? "Pausado \xB7 " + cp.cursor + "/" + cp.queue.length + " partidas conclu\xEDdas" : cp.execution?.status === "COMPLETED" ? "Execu\xE7\xE3o conclu\xEDda \xB7 " + cp.cursor + "/" + cp.queue.length : menuReady ? "Menu conectado \xB7 configure e inicie" : "Abra o menu dos res\xEDduos para iniciar";
     if (cp.execution || cp.uncertain) el("log").textContent = cp.message;
     el("pause").disabled = !running;
     el("resume").disabled = cp.execution?.status !== "PAUSED" || cp.uncertain;
@@ -479,7 +480,7 @@
     renderCatalog();
   }
   function calibration() {
-    const c = { level: input("calibration-level").value.trim(), observedOnly: true, pauseOnMiss: true, learnMissing: input("auto-calibrate").checked };
+    const c = { level: input("calibration-level").value.trim(), background: input("background-enabled").checked, observedOnly: true, pauseOnMiss: true, learnMissing: input("auto-calibrate").checked };
     for (const bin of ["azul", "cinza"]) if (input("force-" + bin).value) {
       c[bin] = { force: input("force-" + bin).valueAsNumber / 100, spin: input("spin-" + bin).valueAsNumber * Math.PI / 180, ...input("vary-aim").checked ? { range: { forceMin: input("force-" + bin).valueAsNumber, forceMax: input("force-max-" + bin).valueAsNumber, angleMin: input("spin-" + bin).valueAsNumber, angleMax: input("spin-max-" + bin).valueAsNumber } } : {} };
       validateProfile(c[bin]);
@@ -535,6 +536,7 @@
   });
   el("aim-details").addEventListener("input", changed);
   el("auto-calibrate").addEventListener("input", changed);
+  el("background-enabled").addEventListener("input", changed);
   input("series-limit").addEventListener("input", changed);
   el("review-catalog").addEventListener("click", () => void act(review));
   el("inspect").addEventListener("click", () => void act(async () => {
@@ -628,6 +630,7 @@
       input("calibration-level").value = s.calibration.level;
       input("series-limit").value = s.limit;
       input("auto-calibrate").checked = s.calibration.learnMissing !== false;
+      input("background-enabled").checked = s.calibration.background !== false;
       for (const bin of ["azul", "cinza"]) {
         const p = s.calibration[bin];
         if (p?.range && (p.range.forceMin !== p.range.forceMax || p.range.angleMin !== p.range.angleMax)) {

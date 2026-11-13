@@ -1,7 +1,7 @@
 import {readCheckpoint} from './storage';
 import {openRound,enterAR,reserveThrow,observeThrow,confirmMenu,commitRound,pauseRound,type Round} from './round';
 import {allowed} from './dom';
-import {debuggerThrow,cancelDebugger} from './debugger-input';
+import {debuggerThrow,cancelDebugger,InputInterruption} from './debugger-input';
 import {initial,type Checkpoint} from './machine';
 import {plan,type Config,type Task} from './planner';
 import {chooseDifferent,pickPair,observedPairs,unmeasuredPairs,requireVariation,type AimProfile,type AimPair} from './aim';
@@ -10,7 +10,8 @@ import type {AssistedStore} from './assisted-store';
 import {sanitizeScore} from './score';
 import {choosePacing} from './pacing';
 import {VERIFIED_PAIRS} from './verified';
-export type Calibration={level:string;observedOnly?:boolean;measuring?:boolean;learnMissing?:boolean;pauseOnMiss?:boolean;azul?:AimProfile;cinza?:AimProfile};
+import {keepGameActive,releaseGame} from './background';
+export type Calibration={level:string;background?:boolean;observedOnly?:boolean;measuring?:boolean;learnMissing?:boolean;pauseOnMiss?:boolean;azul?:AimProfile;cinza?:AimProfile};
 function missingItems(queue:Task[],calibration:Calibration,history:Round[]){return [...new Map(queue.map(t=>[t.item.id,t.item])).values()].filter(item=>observedPairs(history,item.id,item.lixeira,calibration.level,calibration[item.lixeira as 'azul'|'cinza']?.range,VERIFIED_PAIRS).length<2);}
 export type Execution={id:string;tabId:number;status:'RUNNING'|'PAUSED'|'STOPPED'|'COMPLETED';limit:number;completed:number;calibration:Calibration;lastAim?:AimPair;active?:Round;history:Round[]};
 export type ExecutionCheckpoint=Checkpoint&{execution?:Execution};
@@ -63,23 +64,29 @@ export async function seriesMessage(message:any,sender:chrome.runtime.MessageSen
  if(message.type==='series-review'){
  if(sender.url!==chrome.runtime.getURL('popup.html')||message.reviewed!==true||(!cp.uncertain&&!run?.active)||run?.active?.id!==message.id||run?.status==='RUNNING')throw Error('Pause e confira a pendência atual antes de arquivar');
  const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
- if(!tab?.id||!tab.url||!allowed(tab.url)||new URL(tab.url).pathname!=='/ResiduoGo/public/index.php'||run&&run.tabId!==tab.id)throw Error('Volte ao menu dos resíduos na aba desta execução antes de encerrar a pendência');
+ if(!tab?.id||!tab.url||!allowed(tab.url)||new URL(tab.url).pathname!=='/ResiduoGo/public/index.php')throw Error('Volte ao menu dos resíduos antes de encerrar a pendência');
+ if(run&&run.tabId!==tab.id){
+ const original=await chrome.tabs.get(run.tabId).catch(()=>undefined);
+ if(original)throw Error('Confira a aba original da execução e volte ao menu nela antes de encerrar a pendência');
+ // Após fechar/reiniciar o navegador, a aba antiga não existe. A conferência
+ // explícita no menu atual pode arquivar, sem presumir nem reenviar resultado.
+ }
  if(run?.active){
  const archived={...pauseRound(run.active,'Arquivada manualmente após conferência; partida não contabilizada'),reviewedAt:Date.now()};
  const stored=await chrome.storage.local.get('roundHistory');const previous=(stored.roundHistory??[]) as Round[];
  if(!Array.isArray(previous))throw Error('Histórico incompatível');
  roundHistory=previous.some(r=>r.id===archived.id)?previous:[...previous,archived].slice(-10000);
  }
- if(run){cancelDebugger(run.tabId);run.active=undefined;run.status='STOPPED';}cp.state='IDLE';cp.uncertain=false;cp.message='Pendência encerrada após conferência. Clique em Iniciar para um novo plano. Cursor preservado; nenhum resultado reenviado.';
+ if(run){cancelDebugger(run.tabId);await releaseGame(run.tabId).catch(()=>{});run.active=undefined;run.status='STOPPED';}cp.state='IDLE';cp.uncertain=false;cp.message='Pendência encerrada após conferência. Clique em Iniciar para um novo plano. Cursor preservado; nenhum resultado reenviado.';
  await save();reply({ok:true,cp});return;
  }
  if(!sender.tab?.id||sender.frameId!==0||!sender.documentId||!sender.url||!allowed(sender.url))throw Error('Documento de execução inválido');
  if(!run||run.tabId!==sender.tab.id){reply({ok:true,action:'idle'});return;}
  const documentId=sender.documentId;
  const path=new URL(sender.url).pathname;
- const pause=async(reason:string)=>{cancelDebugger(run.tabId);run.status='PAUSED';if(run.active)run.active=pauseRound(run.active,reason);cp.state='PAUSED';cp.uncertain=!!run.active;cp.message=reason;await save();reply({ok:true,action:'pause',cp});};
- if(message.type==='series-fault'){await pause('Execução interrompida; confira a rodada antes de retomar');return;}
+ const pause=async(reason:string)=>{cancelDebugger(run.tabId);run.status='PAUSED';if(run.active)run.active=pauseRound(run.active,reason);cp.state='PAUSED';cp.uncertain=!!run.active;cp.message=reason;await save();await releaseGame(run.tabId).catch(()=>{});reply({ok:true,action:'pause',cp});};
  if(run.status!=='RUNNING'){reply({ok:true,action:'pause'});return;}
+ if(message.type==='series-fault'){await pause('Execução interrompida; confira a rodada antes de retomar');return;}
  if(message.type==='series-document'){
  if(path==='/ResiduoGo/public/index.php'&&message.screen==='HOME'){
  if(run.active){
@@ -92,12 +99,13 @@ export async function seriesMessage(message:any,sender:chrome.runtime.MessageSen
  if(!Array.isArray(previous))throw Error('Histórico de partidas incompatível');
  roundHistory=previous.some(r=>r.id===done.id)?previous:[...previous,done].slice(-10000);
  }
- if(cp.cursor>=cp.queue.length||run.completed>=run.limit){run.status='COMPLETED';cp.state=cp.cursor>=cp.queue.length?'COMPLETED':'PAUSED';cp.previous='HOME';cp.message=`Execução concluída: ${run.completed} partidas confirmadas. Fila preservada.`;await save();reply({ok:true,action:'pause',cp});return;}
+ if(cp.cursor>=cp.queue.length||run.completed>=run.limit){run.status='COMPLETED';cp.state=cp.cursor>=cp.queue.length?'COMPLETED':'PAUSED';cp.previous='HOME';cp.message=`Execução concluída: ${run.completed} partidas confirmadas. Fila preservada.`;await save();await releaseGame(run.tabId).catch(()=>{});reply({ok:true,action:'pause',cp});return;}
  const {catalogReview}=await chrome.storage.local.get('catalogReview');const reviewed=catalogReview as CatalogReview|undefined;
  if(!reviewed?.reviewedAt||!Array.isArray(message.items)||message.items.length!==reviewed.items.length||reviewed.items.some(i=>!message.items.some((actual:any)=>actual.id===i.id&&actual.nome===i.nome&&actual.lixeira===i.lixeira))){await pause('Catálogo mudou: inspecione e revise a seleção antes de continuar');return;}
  const task=cp.queue[cp.cursor];
  if(!message.items.some((item:any)=>item.id===task.item.id&&item.nome===task.item.nome&&item.lixeira===task.item.lixeira)){await pause('Seleção planejada diverge do menu; prepare uma fila revisada');return;}
  if(!run.calibration[task.item.lixeira as 'azul'|'cinza']){await pause('Categoria sem calibração; nenhuma nova partida aberta');return;}
+ if(run.calibration.background){try{await keepGameActive(run.tabId,documentId);}catch{await pause('Segundo plano indisponível. Confira a permissão e o aviso de depuração; nenhum novo card aberto.');return;}}
  run.active=openRound(run.id,crypto.randomUUID(),task,run.tabId,Date.now());cp.state='OPENING';await save();reply({ok:true,action:'open',itemId:task.item.id});return;
  }
  if(path==='/ResiduoGo/public/index.php/ar'&&run.active){
@@ -105,6 +113,7 @@ export async function seriesMessage(message:any,sender:chrome.runtime.MessageSen
  run.active=enterAR(run.active,{tabId:run.tabId,documentId,itemId:new URL(sender.url).searchParams.get('residuo')??''});
  if(run.active.phase==='PAUSED'){await pause('Recarga da partida: confira o resultado, sem repetir');return;}
  if(oldDocument===documentId){reply({ok:true,action:'idle'});return;}
+ if(run.calibration.background){try{await keepGameActive(run.tabId,documentId);}catch{await pause('Segundo plano interrompido. Confira a aba e a permissão antes de continuar.');return;}}
  cp.state='READY';await save();reply({ok:true,action:'play',calibration:run.calibration,category:run.active.task.item.lixeira});return;
  }
  await pause('Tela não reconhecida ou sessão perdida');return;
@@ -132,12 +141,16 @@ export async function seriesMessage(message:any,sender:chrome.runtime.MessageSen
  if(attempt.force===undefined||attempt.spin===undefined)throw Error('Parâmetros da reserva não encontrados; não sortear novamente');
  const candidate={force:attempt.force,spin:attempt.spin};
  attempt.inputClaimedAt=Date.now();await save();
- void debuggerThrow({id:attempt.id,tabId:run.tabId,documentId,itemId:round.task.item.id,...candidate,...attempt.pacing,startedAt:attempt.startedAt}).then(()=>reply({ok:true}),()=>reply({ok:false,error:'Entrada interrompida; não repetir'}));return;
+ void debuggerThrow({id:attempt.id,tabId:run.tabId,documentId,itemId:round.task.item.id,...candidate,...attempt.pacing,startedAt:attempt.startedAt}).then(()=>reply({ok:true}),async error=>{
+ if(error instanceof InputInterruption)await chrome.storage.local.set({inputDiagnostic:{id:attempt.id,timing:error.timing}}).catch(()=>{});
+ reply({ok:false,error:error instanceof Error?error.message:'Entrada interrompida; não repetir'});
+ });return;
  }
  if(message.type==='series-finish'){
  const alreadyFinished=round.attempts.at(-1)?.finishedAt!==undefined;
  run.active=observeThrow(round,documentId,message.id,message.outcome,message.ended===true,Date.now());
  if(!alreadyFinished)run.active.attempts.at(-1)!.score=sanitizeScore(message.score);
+ if(message.outcome==='gesture-error'&&/^Entrada nativa interrompida na etapa: (verificar documento|aguardar ritmo|conectar entrada|medir canvas|posicionar mouse|pressionar|arrastar|soltar)$/.test(message.inputFailure??'')){await pause(message.inputFailure+'. Confira o jogo e encerre a pendência antes de um novo início.');return;}
  if((run.calibration.measuring||run.calibration.pauseOnMiss)&&run.active.attempts.at(-1)?.outcome!=='success'){await pause('Lance sem acerto confirmado. Execução pausada; confira o jogo. O par com erro será excluído após arquivar a pendência.');return;}
  if(run.active.phase==='PAUSED'){await pause('Resultado ambíguo; partida preservada sem contabilizar');return;}
  cp.state=run.active.phase==='RETRY'?'RETRY':'RETURNING';await save();reply({ok:true,action:run.active.phase==='RETRY'?'retry':'return'});return;

@@ -11,6 +11,8 @@ import {seriesMessage,type ExecutionCheckpoint} from './execution';
 import {BUILD_VERSION,PROTOCOL,assertBuild} from './version';
 import {combinedEvidence,requireVariation} from './aim';
 import {VERIFIED_PAIRS} from './verified';
+import {backgroundDetached,gameRoute,releaseGame} from './background';
+import {pauseRound} from './round';
 let serial:Promise<unknown>=Promise.resolve();
 async function assistedStore():Promise<AssistedStore>{
  const data=await chrome.storage.local.get('assisted');const store=data.assisted as AssistedStore|undefined;
@@ -60,7 +62,7 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
  const config=message.config as Config;cp={...initial(),config,queue:plan(config,snapshot?.reviewedAt?snapshot.items:undefined),state:'PAUSED',previous:'HOME',message:'Fila preparada. Confira o total e clique em Iniciar na aba do menu.'};
  }else if(message.type==='pause'||message.type==='stop'){
  cp=transition(cp,message.type);
- if(cp.execution){cp.execution.status=message.type==='stop'?'STOPPED':'PAUSED';cp.uncertain=cp.uncertain||!!cp.execution.active;if(cp.uncertain)cp.message="Rodada pendente preservada. Confira o jogo, volte ao menu e use Encerrar pendência no painel principal.";cancelDebugger(cp.execution.tabId);void chrome.tabs.sendMessage(cp.execution.tabId,{type:'cancel-assisted'}).catch(()=>{});}
+ if(cp.execution){cp.execution.status=message.type==='stop'?'STOPPED':'PAUSED';cp.uncertain=cp.uncertain||!!cp.execution.active;if(cp.uncertain)cp.message="Rodada pendente preservada. Confira o jogo, volte ao menu e use Encerrar pendência no painel principal.";cancelDebugger(cp.execution.tabId);void chrome.tabs.sendMessage(cp.execution.tabId,{type:'cancel-assisted'}).catch(()=>{});await releaseGame(cp.execution.tabId).catch(()=>{});}
  const store=await assistedStore();
  await Promise.all(Object.values(store.active).map(a=>{cancelDebugger(a.tabId);return chrome.tabs.sendMessage(a.tabId,{type:'cancel-assisted'},{documentId:a.documentId}).catch(()=>{});}));
  }else if(message.type==='resume'){
@@ -102,4 +104,31 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
  }).catch(error=>reply({ok:false,error:error instanceof Error?error.message:'Operação indisponível. Revise a aba, seleção e estado do plano.'}));
  return true;
 });
-chrome.runtime.onStartup.addListener(()=>{serial=serial.catch(()=>{}).then(async()=>{const cp=await readCheckpoint();await chrome.storage.local.set({checkpoint:recover(cp)});});});
+chrome.runtime.onStartup.addListener(()=>{serial=serial.catch(()=>{}).then(async()=>{
+ const cp=recover(await readCheckpoint()) as ExecutionCheckpoint;
+ if(cp.execution?.status==='RUNNING'){
+ cp.execution.status='PAUSED';if(cp.execution.active)cp.execution.active=pauseRound(cp.execution.active,'Navegador reiniciado');
+ cp.state='PAUSED';cp.uncertain=cp.uncertain||!!cp.execution.active;cp.message='Navegador reiniciado. Confira o jogo e a pendência antes de continuar.';
+ }
+ await chrome.storage.local.set({checkpoint:cp});
+});});
+function backgroundLost(tabId:number,reason:string){
+ cancelDebugger(tabId);
+ serial=serial.catch(()=>{}).then(async()=>{
+  const cp=await readCheckpoint() as ExecutionCheckpoint;const run=cp.execution;
+  if(!run||run.tabId!==tabId||run.status!=='RUNNING')return;
+  run.status='PAUSED';if(run.active)run.active=pauseRound(run.active,reason);
+  cp.state='PAUSED';cp.uncertain=!!run.active;cp.message=reason;
+  await chrome.storage.local.set({checkpoint:cp});
+  await releaseGame(tabId).catch(()=>{});
+  void chrome.tabs.sendMessage(tabId,{type:'cancel-assisted'}).catch(()=>{});
+ });
+}
+chrome.debugger.onDetach.addListener(source=>{
+ if(source.tabId!==undefined&&backgroundDetached(source.tabId))backgroundLost(source.tabId,'Conexão de segundo plano encerrada. Execução pausada; confira a rodada antes de continuar.');
+});
+chrome.tabs.onUpdated.addListener((tabId,change,tab)=>{
+ // Sem a permissão ampla "tabs", URLs fora do host autorizado podem ser omitidas.
+ if(change.url&&!gameRoute(change.url)||change.status==='complete'&&(!tab.url||!gameRoute(tab.url)))backgroundLost(tabId,'A aba saiu do jogo. Execução pausada; confira a sessão e a rodada pendente.');
+});
+chrome.tabs.onRemoved.addListener(tabId=>backgroundLost(tabId,'A aba do jogo foi fechada. Checkpoint preservado para conferência.'));
