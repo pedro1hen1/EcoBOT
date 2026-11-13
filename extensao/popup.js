@@ -288,7 +288,7 @@
   // package.json
   var package_default = {
     name: "ecobot",
-    version: "0.8.0",
+    version: "0.9.0",
     private: true,
     type: "module",
     scripts: {
@@ -332,11 +332,56 @@
   var compatible = false;
   var busy = false;
   var running = false;
+  var menuReady = false;
+  var loading = true;
+  var latest;
+  var previewTimer;
+  var revision = 0;
+  var readiness;
   function error(value) {
-    el("log").textContent = value instanceof Error ? value.message : String(value);
+    const text = value instanceof Error ? value.message : String(value);
+    el("log").textContent = text;
+    el("action-feedback").textContent = text;
+    if (!running && !latest?.uncertain) el("status").textContent = "A\xE7\xE3o pendente \xB7 confira o aviso";
+    el("status").scrollIntoView({ block: "nearest" });
   }
   function controls() {
-    for (const id of ["start-series", "measure-aim"]) el(id).disabled = !compatible || busy || running;
+    const disabled = !compatible || busy || running || !menuReady || !!latest?.uncertain || !!latest?.execution?.active;
+    el("measure-aim").disabled = disabled;
+    el("start-series").disabled = disabled || !input("auto-calibrate").checked && (!readiness || readiness.pendingThisRun > 0);
+  }
+  function schedulePreview() {
+    if (loading || !compatible || running) return;
+    clearTimeout(previewTimer);
+    const request = ++revision;
+    previewTimer = setTimeout(() => void (async () => {
+      try {
+        const limit = input("series-limit").value;
+        const r = await rpc("series-preview", { config: config(), calibration: calibration(), ...limit ? { limit: Number(limit) } : {} });
+        if (request !== revision) return;
+        readiness = r;
+        el("readiness").textContent = `${r.readyItems}/${r.totalItems} res\xEDduos com pares observados. ` + (r.pendingThisRun ? input("auto-calibrate").checked ? `${r.pendingThisRun} pendentes ser\xE3o medidos durante as ${r.runTotal} partidas desta execu\xE7\xE3o. Pode haver erro; pausa no primeiro resultado sem acerto.` : "Ative a medi\xE7\xE3o autom\xE1tica ou selecione apenas res\xEDduos j\xE1 calibrados." : "Esta execu\xE7\xE3o usa pares j\xE1 observados.");
+        controls();
+      } catch (e) {
+        if (request === revision) {
+          readiness = void 0;
+          el("readiness").textContent = e.message;
+          controls();
+        }
+      }
+    })(), 180);
+  }
+  async function persistDraft() {
+    if (loading) return;
+    const cfg = config();
+    plan(cfg, items);
+    const c = calibration();
+    await chrome.storage.local.set({ draftConfig: cfg, aimSettings: { calibration: c, vary: true, limit: input("series-limit").value } });
+  }
+  function changed() {
+    preview();
+    void persistDraft().catch(() => {
+    });
   }
   function options(next, ids = Array.from(list.selectedOptions, (o) => o.value)) {
     items = next;
@@ -360,7 +405,7 @@
     } catch (e) {
       el("total").textContent = e.message;
     }
-    el("aim-preview").textContent = "Cada lance sorteia um novo par, diferente do anterior. Iniciar usa somente pares com acerto observado neste res\xEDduo e n\xEDvel. Medir explora a faixa, com limite de 2 lances e pausa no primeiro erro.";
+    el("aim-preview").textContent = input("auto-calibrate").checked ? "Iniciar mede os itens pendentes nas pr\xF3prias partidas selecionadas. Com dois pares aprovados, passa a sortear entre eles. Pausa no primeiro resultado sem acerto." : "Iniciar usa somente pares j\xE1 observados. Os itens pendentes precisam de medi\xE7\xE3o antes de iniciar.";
     for (const bin of ["azul", "cinza"]) {
       input("force-max-" + bin).disabled = !input("vary-aim").checked;
       input("spin-max-" + bin).disabled = !input("vary-aim").checked;
@@ -371,15 +416,23 @@
     } catch {
       el("timing-preview").textContent = "Velocidade deve estar entre 1 e 5";
     }
+    controls();
+    schedulePreview();
   }
   function render(cp) {
+    latest = cp;
     running = cp.execution?.status === "RUNNING";
     el("config-fields").disabled = running;
     el("machine-state").textContent = cp.state + " \xB7 " + cp.cursor + "/" + cp.queue.length + " \xB7 " + cp.message;
-    el("status").textContent = running ? "Jogando \xB7 " + cp.cursor + "/" + cp.queue.length + " partidas conclu\xEDdas" : cp.uncertain ? "Pausado: confira o jogo e a pend\xEAncia" : cp.execution?.status === "PAUSED" ? "Pausado \xB7 " + cp.cursor + "/" + cp.queue.length + " partidas conclu\xEDdas" : cp.execution?.status === "COMPLETED" ? "Execu\xE7\xE3o conclu\xEDda \xB7 " + cp.cursor + "/" + cp.queue.length : "Pronto para iniciar a configura\xE7\xE3o abaixo";
+    el("status").textContent = running ? "Jogando \xB7 " + cp.cursor + "/" + cp.queue.length + " partidas conclu\xEDdas" : cp.uncertain ? "Pausado: confira o jogo e a pend\xEAncia" : cp.execution?.status === "PAUSED" ? "Pausado \xB7 " + cp.cursor + "/" + cp.queue.length + " partidas conclu\xEDdas" : cp.execution?.status === "COMPLETED" ? "Execu\xE7\xE3o conclu\xEDda \xB7 " + cp.cursor + "/" + cp.queue.length : menuReady ? "Menu conectado \xB7 configure e inicie" : "Abra o menu dos res\xEDduos para iniciar";
     if (cp.execution || cp.uncertain) el("log").textContent = cp.message;
     el("pause").disabled = !running;
     el("resume").disabled = cp.execution?.status !== "PAUSED" || cp.uncertain;
+    const pending = !!cp.uncertain || !!cp.execution?.active && !running;
+    el("recovery").hidden = !pending;
+    el("recovery-reason").textContent = cp.message;
+    el("review-round").disabled = running;
+    if (!pending) input("round-reviewed").checked = false;
     controls();
   }
   async function rpc(type, data = {}) {
@@ -401,7 +454,7 @@
     return r;
   }
   function renderCatalog() {
-    el("catalog-warning").textContent = snapshot ? snapshot.items.length + " res\xEDduos \xB7 " + (snapshot.warning || "cat\xE1logo confere") + (snapshot.reviewedAt ? " \xB7 revisado" : "") : "Abra o menu do jogo para ler o cat\xE1logo.";
+    el("catalog-warning").textContent = snapshot ? snapshot.items.length + " res\xEDduos \xB7 " + (!menuReady ? "\xFAltimo cat\xE1logo salvo; abra o menu para atualizar" : (snapshot.warning || "cat\xE1logo confere") + (snapshot.reviewedAt ? " \xB7 revisado" : "")) : "Abra o menu do jogo para ler o cat\xE1logo.";
     el("catalog-items").textContent = snapshot?.items.map((i) => i.nome + " \xB7 " + i.lixeira + " (" + i.id + ")").join("\n") ?? "";
     el("review-catalog").disabled = !snapshot || snapshot.warning.includes("N\xE3o executar");
     if (snapshot?.reviewedAt) {
@@ -410,9 +463,13 @@
     }
   }
   async function inspect() {
+    menuReady = false;
+    controls();
     const r = await rpc("inspect");
+    menuReady = r.result.screen === "HOME" && !r.result.catalog?.warning?.includes("N\xE3o executar");
     snapshot = (await rpc("catalog-status")).catalogReview;
     renderCatalog();
+    if (latest) render(latest);
     if (r.result.screen !== "HOME" || snapshot?.warning.includes("N\xE3o executar")) throw Error("Volte ao menu dos res\xEDduos na aba do jogo antes de iniciar.");
     return snapshot;
   }
@@ -422,7 +479,7 @@
     renderCatalog();
   }
   function calibration() {
-    const c = { level: input("calibration-level").value.trim(), observedOnly: true, pauseOnMiss: true };
+    const c = { level: input("calibration-level").value.trim(), observedOnly: true, pauseOnMiss: true, learnMissing: input("auto-calibrate").checked };
     for (const bin of ["azul", "cinza"]) if (input("force-" + bin).value) {
       c[bin] = { force: input("force-" + bin).valueAsNumber / 100, spin: input("spin-" + bin).valueAsNumber * Math.PI / 180, ...input("vary-aim").checked ? { range: { forceMin: input("force-" + bin).valueAsNumber, forceMax: input("force-max-" + bin).valueAsNumber, angleMin: input("spin-" + bin).valueAsNumber, angleMax: input("spin-max-" + bin).valueAsNumber } } : {} };
       validateProfile(c[bin]);
@@ -461,6 +518,7 @@
     busy = true;
     controls();
     el("log").textContent = "";
+    el("action-feedback").textContent = "";
     try {
       await action();
     } catch (e) {
@@ -470,12 +528,14 @@
       controls();
     }
   }
-  el("config").addEventListener("input", preview);
+  el("config").addEventListener("input", changed);
   el("config").addEventListener("submit", (e) => {
     e.preventDefault();
     void start(e.isTrusted);
   });
-  el("aim-details").addEventListener("input", preview);
+  el("aim-details").addEventListener("input", changed);
+  el("auto-calibrate").addEventListener("input", changed);
+  input("series-limit").addEventListener("input", changed);
   el("review-catalog").addEventListener("click", () => void act(review));
   el("inspect").addEventListener("click", () => void act(async () => {
     await inspect();
@@ -486,6 +546,7 @@
   function start(trusted, measure = false) {
     return act(async () => {
       if (!trusted || !input("series-permission").checked) throw Error("Marque a autoriza\xE7\xE3o das partidas selecionadas para iniciar.");
+      await persistDraft();
       const c = calibration();
       let cfg = config();
       if (measure) {
@@ -529,6 +590,7 @@
   }));
   el("review-round").addEventListener("click", () => void act(async () => {
     if (!input("round-reviewed").checked) throw Error("Confira o jogo e marque a confirma\xE7\xE3o antes de arquivar.");
+    await inspect();
     const cp = await readCheckpoint();
     const r = await rpc("series-review", { id: cp.execution?.active?.id, reviewed: true });
     render(r.cp);
@@ -557,14 +619,15 @@
     snapshot = (await rpc("catalog-status")).catalogReview;
     if (snapshot?.reviewedAt) options(snapshot.items, defaults.ids);
     const saved = await readCheckpoint();
-    const c = saved.config ?? defaults;
+    const { aimSettings, draftConfig } = await chrome.storage.local.get(["aimSettings", "draftConfig"]);
+    const c = (running ? saved.config : draftConfig) ?? saved.config ?? defaults;
     for (const key of ["mode", "category", "repeats", "sequences", "order", "speed"]) input(key).value = String(c[key]);
     for (const o of list.options) o.selected = c.ids.includes(o.value);
-    const { aimSettings } = await chrome.storage.local.get("aimSettings");
     const s = aimSettings;
     if (s?.calibration) {
       input("calibration-level").value = s.calibration.level;
       input("series-limit").value = s.limit;
+      input("auto-calibrate").checked = s.calibration.learnMissing !== false;
       for (const bin of ["azul", "cinza"]) {
         const p = s.calibration[bin];
         if (p?.range && (p.range.forceMin !== p.range.forceMax || p.range.angleMin !== p.range.angleMax)) {
@@ -582,8 +645,11 @@
     try {
       await inspect();
     } catch (e) {
+      menuReady = false;
       error(e);
     }
+    loading = false;
+    preview();
     controls();
   }
   preview();

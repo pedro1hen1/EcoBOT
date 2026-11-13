@@ -3,7 +3,7 @@ import type {Outcome} from './assisted-store';
 import type {ScoreObservation} from './score';
 import type {Pacing} from './pacing';
 export type RoundPhase='OPENING'|'READY'|'FLYING'|'RETRY'|'RETURNING'|'COMPLETED'|'PAUSED';
-export type RoundAttempt={id:string;startedAt:number;finishedAt?:number;outcome?:Outcome;inputClaimedAt?:number;force?:number;spin?:number;score?:ScoreObservation;pacing?:Pacing};
+export type RoundAttempt={id:string;startedAt:number;finishedAt?:number;outcome?:Outcome;inputClaimedAt?:number;force?:number;spin?:number;score?:ScoreObservation;pacing?:Pacing;aimSource?:'learning'|'observed'};
 export type Round={id:string;runId:string;task:Task;tabId:number;documentId?:string;level?:string;phase:RoundPhase;startedAt:number;endedAt?:number;reviewedAt?:number;attempts:RoundAttempt[];terminal?:'success'|'ended-failure';reason?:string;menuDocumentId?:string};
 export function openRound(runId:string,id:string,task:Task,tabId:number,now:number):Round{
  return {runId,id,task:structuredClone(task),tabId,phase:'OPENING',startedAt:now,attempts:[]};

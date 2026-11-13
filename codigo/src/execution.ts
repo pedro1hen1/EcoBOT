@@ -3,20 +3,32 @@ import {openRound,enterAR,reserveThrow,observeThrow,confirmMenu,commitRound,paus
 import {allowed} from './dom';
 import {debuggerThrow,cancelDebugger} from './debugger-input';
 import {initial,type Checkpoint} from './machine';
-import {plan,type Config} from './planner';
+import {plan,type Config,type Task} from './planner';
 import {chooseDifferent,pickPair,observedPairs,unmeasuredPairs,requireVariation,type AimProfile,type AimPair} from './aim';
 import type {CatalogReview} from './catalog-store';
 import type {AssistedStore} from './assisted-store';
 import {sanitizeScore} from './score';
 import {choosePacing} from './pacing';
 import {VERIFIED_PAIRS} from './verified';
-export type Calibration={level:string;observedOnly?:boolean;measuring?:boolean;pauseOnMiss?:boolean;azul?:AimProfile;cinza?:AimProfile};
+export type Calibration={level:string;observedOnly?:boolean;measuring?:boolean;learnMissing?:boolean;pauseOnMiss?:boolean;azul?:AimProfile;cinza?:AimProfile};
+function missingItems(queue:Task[],calibration:Calibration,history:Round[]){return [...new Map(queue.map(t=>[t.item.id,t.item])).values()].filter(item=>observedPairs(history,item.id,item.lixeira,calibration.level,calibration[item.lixeira as 'azul'|'cinza']?.range,VERIFIED_PAIRS).length<2);}
 export type Execution={id:string;tabId:number;status:'RUNNING'|'PAUSED'|'STOPPED'|'COMPLETED';limit:number;completed:number;calibration:Calibration;lastAim?:AimPair;active?:Round;history:Round[]};
 export type ExecutionCheckpoint=Checkpoint&{execution?:Execution};
 export async function seriesMessage(message:any,sender:chrome.runtime.MessageSender,reply:(response:any)=>void):Promise<void>{
  let cp=await readCheckpoint() as ExecutionCheckpoint;
  let roundHistory:Round[]|undefined;
  const save=async()=>{await chrome.storage.local.set({checkpoint:cp,...(roundHistory?{roundHistory}:{})});};
+ if(message.type==='series-preview'){
+ if(message.limit!==undefined&&(!Number.isInteger(message.limit)||message.limit<1||message.limit>10000))throw Error('Use um limite entre 1 e 10.000 partidas');
+ if(sender.url!==chrome.runtime.getURL('popup.html'))throw Error('Somente o painel pode consultar a seleção');
+ const stored=await chrome.storage.local.get(['catalogReview','roundHistory']);const reviewed=stored.catalogReview as CatalogReview|undefined;
+ const queue=plan(message.config as Config,reviewed?.reviewedAt?reviewed.items:undefined);const calibration=message.calibration as Calibration;
+ if(!calibration?.level?.trim())throw Error('Informe o nível visível no jogo');
+ for(const p of [calibration.azul,calibration.cinza])if(p)requireVariation(p);
+ const history=(stored.roundHistory??[]) as Round[];const totalItems=new Set(queue.map(t=>t.item.id)).size;
+ const limited=queue.slice(0,message.limit??queue.length);const missing=missingItems(limited,calibration,history);
+ reply({ok:true,totalItems,readyItems:totalItems-missingItems(queue,calibration,history).length,pendingThisRun:missing.length,total:queue.length,runTotal:limited.length,missing:missing.map(i=>i.nome)});return;
+ }
  if(message.type==='series-start'){
  if(sender.tab&&sender.url!==chrome.runtime.getURL('popup.html'))throw Error('Somente o painel pode iniciar');
  if(cp.uncertain||cp.execution?.status==='RUNNING'||cp.execution?.active)throw Error('Pause e confira a rodada pendente antes de iniciar outra execução');
@@ -28,12 +40,13 @@ export async function seriesMessage(message:any,sender:chrome.runtime.MessageSen
  if(!Number.isInteger(limit)||limit<1||limit>10000)throw Error('Use um limite entre 1 e 10.000 partidas');
  const calibration=message.calibration as Calibration;
  if(!calibration||typeof calibration.level!=='string'||!calibration.level.trim())throw Error('Informe o nível da calibração');
+ if(calibration.learnMissing)calibration.pauseOnMiss=true;
  if(calibration.measuring&&(limit!==2||cp.queue.length!==2||cp.queue[0].item.id!==cp.queue[1].item.id))throw Error('Medição exige um resíduo e exatamente duas partidas');
  for(const bin of ['azul','cinza'] as const)if(calibration[bin])requireVariation(calibration[bin]!);
  if(calibration.measuring){const item=cp.queue[cp.cursor].item;const range=calibration[item.lixeira as 'azul'|'cinza']?.range;const history=((await chrome.storage.local.get('roundHistory')).roundHistory??[]) as Round[];if(!range||unmeasuredPairs(history,item.id,item.lixeira,calibration.level,range,VERIFIED_PAIRS).length<2)throw Error('Há menos de dois pares ainda não medidos nesta faixa. Amplie a faixa ou inicie com os pares já observados.');}
- if(calibration.observedOnly){
+ if(calibration.observedOnly&&!calibration.learnMissing){
  const history=((await chrome.storage.local.get('roundHistory')).roundHistory??[]) as Round[];
- const missing=[...new Map(cp.queue.slice(cp.cursor,cp.cursor+limit).map(t=>[t.item.id,t.item])).values()].filter(item=>observedPairs(history,item.id,item.lixeira,calibration.level,calibration[item.lixeira as 'azul'|'cinza']?.range,VERIFIED_PAIRS).length<2);
+ const missing=missingItems(cp.queue.slice(cp.cursor,cp.cursor+limit),calibration,history);
  if(missing.length)throw Error('Faltam 2 pares com acerto e sem erro neste nível para: '+missing.slice(0,5).map(i=>i.nome).join(', ')+'. Selecione um resíduo e use Medir 2 lances. Nenhuma partida iniciada.');
  }
  if(!catalogReview?.reviewedAt||catalogReview.warning.includes('Não executar'))throw Error('Inspecione e revise o catálogo do menu atual');
@@ -48,12 +61,16 @@ export async function seriesMessage(message:any,sender:chrome.runtime.MessageSen
  const run=cp.execution;
  if(message.type==='series-status'){reply({ok:true,cp});return;}
  if(message.type==='series-review'){
- if(sender.url!==chrome.runtime.getURL('popup.html')||message.reviewed!==true||!run?.active||run.active.id!==message.id||run.status==='RUNNING')throw Error('Pause e confira a pendência atual antes de arquivar');
+ if(sender.url!==chrome.runtime.getURL('popup.html')||message.reviewed!==true||(!cp.uncertain&&!run?.active)||run?.active?.id!==message.id||run?.status==='RUNNING')throw Error('Pause e confira a pendência atual antes de arquivar');
+ const [tab]=await chrome.tabs.query({active:true,currentWindow:true});
+ if(!tab?.id||!tab.url||!allowed(tab.url)||new URL(tab.url).pathname!=='/ResiduoGo/public/index.php'||run&&run.tabId!==tab.id)throw Error('Volte ao menu dos resíduos na aba desta execução antes de encerrar a pendência');
+ if(run?.active){
  const archived={...pauseRound(run.active,'Arquivada manualmente após conferência; partida não contabilizada'),reviewedAt:Date.now()};
  const stored=await chrome.storage.local.get('roundHistory');const previous=(stored.roundHistory??[]) as Round[];
  if(!Array.isArray(previous))throw Error('Histórico incompatível');
  roundHistory=previous.some(r=>r.id===archived.id)?previous:[...previous,archived].slice(-10000);
- run.active=undefined;run.status='STOPPED';cp.state='IDLE';cp.uncertain=false;cp.message='Pendência arquivada após conferência. Cursor preservado; nenhum resultado reenviado.';
+ }
+ if(run){cancelDebugger(run.tabId);run.active=undefined;run.status='STOPPED';}cp.state='IDLE';cp.uncertain=false;cp.message='Pendência encerrada após conferência. Clique em Iniciar para um novo plano. Cursor preservado; nenhum resultado reenviado.';
  await save();reply({ok:true,cp});return;
  }
  if(!sender.tab?.id||sender.frameId!==0||!sender.documentId||!sender.url||!allowed(sender.url))throw Error('Documento de execução inválido');
@@ -98,8 +115,16 @@ export async function seriesMessage(message:any,sender:chrome.runtime.MessageSen
  if(message.level!==run.calibration.level){await pause('Nível mudou: requer nova calibração');return;}
  const profile=run.calibration[round.task.item.lixeira as 'azul'|'cinza'];if(!profile)throw Error('Categoria sem calibração');
  const storedRounds=((await chrome.storage.local.get('roundHistory')).roundHistory??[]) as Round[];
- const candidate=run.calibration.measuring?(()=>{const options=unmeasuredPairs(storedRounds,round.task.item.id,round.task.item.lixeira,run.calibration.level,profile.range!,VERIFIED_PAIRS);if(options.length===1)return {...options[0],margin:0};return pickPair(options,run.lastAim);})():run.calibration.observedOnly?pickPair(observedPairs([...storedRounds,round],round.task.item.id,round.task.item.lixeira,run.calibration.level,profile.range,VERIFIED_PAIRS),run.lastAim):chooseDifferent(profile,run.lastAim);
- run.active=reserveThrow(round,documentId,crypto.randomUUID(),Date.now());run.active.level=message.level;run.lastAim={force:candidate.force,spin:candidate.spin};Object.assign(run.active.attempts.at(-1)!,{force:candidate.force,spin:candidate.spin,pacing:choosePacing(cp.config?.speed??3)});cp.state='FLYING';await save();reply({ok:true,id:run.active.attempts.at(-1)!.id,candidate});return;
+ const known=observedPairs([...storedRounds,round],round.task.item.id,round.task.item.lixeira,run.calibration.level,profile.range,VERIFIED_PAIRS);
+ const learning=!!run.calibration.measuring||!!run.calibration.learnMissing&&known.length<2;
+ let candidate;
+ if(learning){
+ const options=unmeasuredPairs(storedRounds,round.task.item.id,round.task.item.lixeira,run.calibration.level,profile.range!,VERIFIED_PAIRS);
+ if(!options.length){await pause('Faixa sem novos pares para medir. Confira a calibração antes de continuar.');return;}
+ if(options.length===1&&run.lastAim?.force===options[0].force&&run.lastAim?.spin===options[0].spin){await pause('O único par disponível repetiria o último lance. Amplie a faixa para medir outra combinação.');return;}
+ candidate=options.length===1?{...options[0],margin:0}:pickPair(options,run.lastAim);
+ }else candidate=run.calibration.observedOnly?pickPair(known,run.lastAim):chooseDifferent(profile,run.lastAim);
+ run.active=reserveThrow(round,documentId,crypto.randomUUID(),Date.now());run.active.level=message.level;run.lastAim={force:candidate.force,spin:candidate.spin};Object.assign(run.active.attempts.at(-1)!,{force:candidate.force,spin:candidate.spin,aimSource:learning?'learning':'observed',pacing:choosePacing(cp.config?.speed??3)});cp.state='FLYING';cp.message=(learning?'Medindo combinação nova de ':'Usando par observado de ')+round.task.item.nome+'. A partida faz parte da quantidade selecionada.';await save();reply({ok:true,id:run.active.attempts.at(-1)!.id,candidate});return;
  }
  const attempt=round.attempts.at(-1);
  if(message.type==='series-input'){

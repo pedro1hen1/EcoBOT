@@ -409,7 +409,7 @@
   // package.json
   var package_default = {
     name: "ecobot",
-    version: "0.8.0",
+    version: "0.9.0",
     private: true,
     type: "module",
     scripts: {
@@ -425,7 +425,7 @@
 
   // src/version.ts
   var BUILD_VERSION = package_default.version;
-  var PROTOCOL = 8;
+  var PROTOCOL = 9;
   function assertBuild(reply) {
     if (reply?.buildVersion !== BUILD_VERSION) throw Error(`Vers\xF5es desencontradas. Esta tela \xE9 ${BUILD_VERSION}, mas o componente carregado \xE9 ${reply?.buildVersion ?? "antigo"}. Recarregue o EcoBot na p\xE1gina de extens\xF5es e depois recarregue a aba do jogo.`);
   }
@@ -660,12 +660,31 @@
   ];
 
   // src/execution.ts
+  function missingItems(queue, calibration, history) {
+    return [...new Map(queue.map((t) => [t.item.id, t.item])).values()].filter((item) => observedPairs(history, item.id, item.lixeira, calibration.level, calibration[item.lixeira]?.range, VERIFIED_PAIRS).length < 2);
+  }
   async function seriesMessage(message, sender, reply) {
     let cp = await readCheckpoint();
     let roundHistory;
     const save = async () => {
       await chrome.storage.local.set({ checkpoint: cp, ...roundHistory ? { roundHistory } : {} });
     };
+    if (message.type === "series-preview") {
+      if (message.limit !== void 0 && (!Number.isInteger(message.limit) || message.limit < 1 || message.limit > 1e4)) throw Error("Use um limite entre 1 e 10.000 partidas");
+      if (sender.url !== chrome.runtime.getURL("popup.html")) throw Error("Somente o painel pode consultar a sele\xE7\xE3o");
+      const stored = await chrome.storage.local.get(["catalogReview", "roundHistory"]);
+      const reviewed = stored.catalogReview;
+      const queue = plan(message.config, reviewed?.reviewedAt ? reviewed.items : void 0);
+      const calibration = message.calibration;
+      if (!calibration?.level?.trim()) throw Error("Informe o n\xEDvel vis\xEDvel no jogo");
+      for (const p of [calibration.azul, calibration.cinza]) if (p) requireVariation(p);
+      const history = stored.roundHistory ?? [];
+      const totalItems = new Set(queue.map((t) => t.item.id)).size;
+      const limited = queue.slice(0, message.limit ?? queue.length);
+      const missing = missingItems(limited, calibration, history);
+      reply({ ok: true, totalItems, readyItems: totalItems - missingItems(queue, calibration, history).length, pendingThisRun: missing.length, total: queue.length, runTotal: limited.length, missing: missing.map((i) => i.nome) });
+      return;
+    }
     if (message.type === "series-start") {
       if (sender.tab && sender.url !== chrome.runtime.getURL("popup.html")) throw Error("Somente o painel pode iniciar");
       if (cp.uncertain || cp.execution?.status === "RUNNING" || cp.execution?.active) throw Error("Pause e confira a rodada pendente antes de iniciar outra execu\xE7\xE3o");
@@ -681,6 +700,7 @@
       if (!Number.isInteger(limit) || limit < 1 || limit > 1e4) throw Error("Use um limite entre 1 e 10.000 partidas");
       const calibration = message.calibration;
       if (!calibration || typeof calibration.level !== "string" || !calibration.level.trim()) throw Error("Informe o n\xEDvel da calibra\xE7\xE3o");
+      if (calibration.learnMissing) calibration.pauseOnMiss = true;
       if (calibration.measuring && (limit !== 2 || cp.queue.length !== 2 || cp.queue[0].item.id !== cp.queue[1].item.id)) throw Error("Medi\xE7\xE3o exige um res\xEDduo e exatamente duas partidas");
       for (const bin of ["azul", "cinza"]) if (calibration[bin]) requireVariation(calibration[bin]);
       if (calibration.measuring) {
@@ -689,9 +709,9 @@
         const history = (await chrome.storage.local.get("roundHistory")).roundHistory ?? [];
         if (!range || unmeasuredPairs(history, item.id, item.lixeira, calibration.level, range, VERIFIED_PAIRS).length < 2) throw Error("H\xE1 menos de dois pares ainda n\xE3o medidos nesta faixa. Amplie a faixa ou inicie com os pares j\xE1 observados.");
       }
-      if (calibration.observedOnly) {
+      if (calibration.observedOnly && !calibration.learnMissing) {
         const history = (await chrome.storage.local.get("roundHistory")).roundHistory ?? [];
-        const missing = [...new Map(cp.queue.slice(cp.cursor, cp.cursor + limit).map((t) => [t.item.id, t.item])).values()].filter((item) => observedPairs(history, item.id, item.lixeira, calibration.level, calibration[item.lixeira]?.range, VERIFIED_PAIRS).length < 2);
+        const missing = missingItems(cp.queue.slice(cp.cursor, cp.cursor + limit), calibration, history);
         if (missing.length) throw Error("Faltam 2 pares com acerto e sem erro neste n\xEDvel para: " + missing.slice(0, 5).map((i) => i.nome).join(", ") + ". Selecione um res\xEDduo e use Medir 2 lances. Nenhuma partida iniciada.");
       }
       if (!catalogReview?.reviewedAt || catalogReview.warning.includes("N\xE3o executar")) throw Error("Inspecione e revise o cat\xE1logo do menu atual");
@@ -713,17 +733,24 @@
       return;
     }
     if (message.type === "series-review") {
-      if (sender.url !== chrome.runtime.getURL("popup.html") || message.reviewed !== true || !run?.active || run.active.id !== message.id || run.status === "RUNNING") throw Error("Pause e confira a pend\xEAncia atual antes de arquivar");
-      const archived = { ...pauseRound(run.active, "Arquivada manualmente ap\xF3s confer\xEAncia; partida n\xE3o contabilizada"), reviewedAt: Date.now() };
-      const stored = await chrome.storage.local.get("roundHistory");
-      const previous = stored.roundHistory ?? [];
-      if (!Array.isArray(previous)) throw Error("Hist\xF3rico incompat\xEDvel");
-      roundHistory = previous.some((r) => r.id === archived.id) ? previous : [...previous, archived].slice(-1e4);
-      run.active = void 0;
-      run.status = "STOPPED";
+      if (sender.url !== chrome.runtime.getURL("popup.html") || message.reviewed !== true || !cp.uncertain && !run?.active || run?.active?.id !== message.id || run?.status === "RUNNING") throw Error("Pause e confira a pend\xEAncia atual antes de arquivar");
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (!tab?.id || !tab.url || !allowed(tab.url) || new URL(tab.url).pathname !== "/ResiduoGo/public/index.php" || run && run.tabId !== tab.id) throw Error("Volte ao menu dos res\xEDduos na aba desta execu\xE7\xE3o antes de encerrar a pend\xEAncia");
+      if (run?.active) {
+        const archived = { ...pauseRound(run.active, "Arquivada manualmente ap\xF3s confer\xEAncia; partida n\xE3o contabilizada"), reviewedAt: Date.now() };
+        const stored = await chrome.storage.local.get("roundHistory");
+        const previous = stored.roundHistory ?? [];
+        if (!Array.isArray(previous)) throw Error("Hist\xF3rico incompat\xEDvel");
+        roundHistory = previous.some((r) => r.id === archived.id) ? previous : [...previous, archived].slice(-1e4);
+      }
+      if (run) {
+        cancelDebugger(run.tabId);
+        run.active = void 0;
+        run.status = "STOPPED";
+      }
       cp.state = "IDLE";
       cp.uncertain = false;
-      cp.message = "Pend\xEAncia arquivada ap\xF3s confer\xEAncia. Cursor preservado; nenhum resultado reenviado.";
+      cp.message = "Pend\xEAncia encerrada ap\xF3s confer\xEAncia. Clique em Iniciar para um novo plano. Cursor preservado; nenhum resultado reenviado.";
       await save();
       reply({ ok: true, cp });
       return;
@@ -830,16 +857,27 @@
       const profile = run.calibration[round.task.item.lixeira];
       if (!profile) throw Error("Categoria sem calibra\xE7\xE3o");
       const storedRounds = (await chrome.storage.local.get("roundHistory")).roundHistory ?? [];
-      const candidate = run.calibration.measuring ? (() => {
+      const known = observedPairs([...storedRounds, round], round.task.item.id, round.task.item.lixeira, run.calibration.level, profile.range, VERIFIED_PAIRS);
+      const learning = !!run.calibration.measuring || !!run.calibration.learnMissing && known.length < 2;
+      let candidate;
+      if (learning) {
         const options = unmeasuredPairs(storedRounds, round.task.item.id, round.task.item.lixeira, run.calibration.level, profile.range, VERIFIED_PAIRS);
-        if (options.length === 1) return { ...options[0], margin: 0 };
-        return pickPair(options, run.lastAim);
-      })() : run.calibration.observedOnly ? pickPair(observedPairs([...storedRounds, round], round.task.item.id, round.task.item.lixeira, run.calibration.level, profile.range, VERIFIED_PAIRS), run.lastAim) : chooseDifferent(profile, run.lastAim);
+        if (!options.length) {
+          await pause("Faixa sem novos pares para medir. Confira a calibra\xE7\xE3o antes de continuar.");
+          return;
+        }
+        if (options.length === 1 && run.lastAim?.force === options[0].force && run.lastAim?.spin === options[0].spin) {
+          await pause("O \xFAnico par dispon\xEDvel repetiria o \xFAltimo lance. Amplie a faixa para medir outra combina\xE7\xE3o.");
+          return;
+        }
+        candidate = options.length === 1 ? { ...options[0], margin: 0 } : pickPair(options, run.lastAim);
+      } else candidate = run.calibration.observedOnly ? pickPair(known, run.lastAim) : chooseDifferent(profile, run.lastAim);
       run.active = reserveThrow(round, documentId, crypto.randomUUID(), Date.now());
       run.active.level = message.level;
       run.lastAim = { force: candidate.force, spin: candidate.spin };
-      Object.assign(run.active.attempts.at(-1), { force: candidate.force, spin: candidate.spin, pacing: choosePacing(cp.config?.speed ?? 3) });
+      Object.assign(run.active.attempts.at(-1), { force: candidate.force, spin: candidate.spin, aimSource: learning ? "learning" : "observed", pacing: choosePacing(cp.config?.speed ?? 3) });
       cp.state = "FLYING";
+      cp.message = (learning ? "Medindo combina\xE7\xE3o nova de " : "Usando par observado de ") + round.task.item.nome + ". A partida faz parte da quantidade selecionada.";
       await save();
       reply({ ok: true, id: run.active.attempts.at(-1).id, candidate });
       return;
@@ -940,6 +978,7 @@
         if (cp.execution) {
           cp.execution.status = message.type === "stop" ? "STOPPED" : "PAUSED";
           cp.uncertain = cp.uncertain || !!cp.execution.active;
+          if (cp.uncertain) cp.message = "Rodada pendente preservada. Confira o jogo, volte ao menu e use Encerrar pend\xEAncia no painel principal.";
           cancelDebugger(cp.execution.tabId);
           void chrome.tabs.sendMessage(cp.execution.tabId, { type: "cancel-assisted" }).catch(() => {
           });
@@ -968,7 +1007,7 @@
         });
         assertBuild(result);
         if (result?.ok === false) throw Error(result.error);
-        if (message.type === "inspect") {
+        if (message.type === "inspect" && result.screen === "HOME" && !result.catalog.warning.includes("N\xE3o executar")) {
           const previous = (await chrome.storage.local.get("catalogReview")).catalogReview;
           const same = previous?.reviewedAt && previous.items.length === result.catalog.items.length && previous.items.every((item, index) => {
             const actual = result.catalog.items[index];

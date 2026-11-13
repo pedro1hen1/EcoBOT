@@ -60,7 +60,7 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
  const config=message.config as Config;cp={...initial(),config,queue:plan(config,snapshot?.reviewedAt?snapshot.items:undefined),state:'PAUSED',previous:'HOME',message:'Fila preparada. Confira o total e clique em Iniciar na aba do menu.'};
  }else if(message.type==='pause'||message.type==='stop'){
  cp=transition(cp,message.type);
- if(cp.execution){cp.execution.status=message.type==='stop'?'STOPPED':'PAUSED';cp.uncertain=cp.uncertain||!!cp.execution.active;cancelDebugger(cp.execution.tabId);void chrome.tabs.sendMessage(cp.execution.tabId,{type:'cancel-assisted'}).catch(()=>{});}
+ if(cp.execution){cp.execution.status=message.type==='stop'?'STOPPED':'PAUSED';cp.uncertain=cp.uncertain||!!cp.execution.active;if(cp.uncertain)cp.message="Rodada pendente preservada. Confira o jogo, volte ao menu e use Encerrar pendência no painel principal.";cancelDebugger(cp.execution.tabId);void chrome.tabs.sendMessage(cp.execution.tabId,{type:'cancel-assisted'}).catch(()=>{});}
  const store=await assistedStore();
  await Promise.all(Object.values(store.active).map(a=>{cancelDebugger(a.tabId);return chrome.tabs.sendMessage(a.tabId,{type:'cancel-assisted'},{documentId:a.documentId}).catch(()=>{});}));
  }else if(message.type==='resume'){
@@ -76,7 +76,7 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
  const result=await chrome.tabs.sendMessage(tab.id,{type:message.type}).catch(()=>{throw Error('A extensão não está conectada à aba. Recarregue o jogo depois de recarregar o EcoBot na página de extensões.');});
  assertBuild(result);
  if(result?.ok===false)throw Error(result.error);
- if(message.type==='inspect'){
+ if(message.type==='inspect'&&result.screen==='HOME'&&!result.catalog.warning.includes('Não executar')){
  const previous=(await chrome.storage.local.get('catalogReview')).catalogReview as CatalogReview|undefined;
  const same=previous?.reviewedAt&&previous.items.length===result.catalog.items.length&&previous.items.every((item,index)=>{const actual=result.catalog.items[index];return actual.id===item.id&&actual.nome===item.nome&&actual.lixeira===item.lixeira;});
  const catalogReview:CatalogReview={version:1,items:result.catalog.items,warning:result.catalog.warning,inspectedAt:Date.now(),...(same?{reviewedAt:previous.reviewedAt}:{})};

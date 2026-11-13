@@ -3,7 +3,7 @@
 </p>
 <h1 align="center">EcoBot</h1>
 <p align="center">Seu plano. Cada lance, uma nova combinação.</p>
-<p align="center"><kbd>Chrome</kbd> <kbd>Edge</kbd> <kbd>Manifest V3</kbd> <kbd>0.8.0</kbd></p>
+<p align="center"><kbd>Chrome</kbd> <kbd>Edge</kbd> <kbd>Manifest V3</kbd> <kbd>0.9.0</kbd></p>
 <p align="center">
   <a href="#instalar">Instalar</a> · <a href="#primeira-partida">Primeira partida</a> · <a href="#configurar-a-serie">Configurar</a> · <a href="#duvidas-frequentes">Dúvidas</a>
 </p>
@@ -62,7 +62,7 @@ O total aparece antes de iniciar. Uma tentativa de arremesso não é uma partida
 | **Retomar** | Continua uma execução pausada quando não existe pendência incerta. |
 | **Parar** | Encerra a execução preservando o cursor e os registros. |
 
-A série pausa no primeiro resultado sem acerto confirmado. Confira o jogo antes de continuar. Em **Avançado**, uma pendência pode ser arquivada após conferência, sem contar partida nem reenviar resultado.
+A série pausa no primeiro resultado sem acerto confirmado. Confira o jogo antes de continuar. A seção **Encerrar rodada pendente** aparece no painel principal. Confira o jogo, volte ao menu na mesma aba, marque a confirmação e clique em **Encerrar pendência e liberar novo início**. Depois clique em **Iniciar**. Parar preserva a pendência; Retomar fica bloqueado enquanto o resultado for incerto. Encerrar não conta a rodada nem reenvia resultados.
 
 ## Sorteio e calibração
 
@@ -70,7 +70,7 @@ Cada lance sorteia **força, ângulo e ritmo**. O par completo de força/ângulo
 
 A série usa somente pares com **acerto observado e nenhum erro registrado**, para o mesmo resíduo, categoria, nível e faixa configurada. Inclui calibração prévia de **Jornal** e **Casca de banana**, com acertos locais e prévios separados na tabela. Essas medições não criam partidas fictícias no histórico. Um erro local exclui o par.
 
-**Os outros 46 resíduos precisam de medição própria.** A faixa não aprova automaticamente todas as combinações intermediárias. Acerto observado não é garantia de erro zero.
+**Os outros 46 resíduos precisam de medição própria.** Com **Medir automaticamente os resíduos pendentes** ativado, o Iniciar mede nas próprias partidas selecionadas, sem adicionar partidas. Após dois pares aprovados para o item, usa o sorteio entre pares observados. A medição pode errar e pausa no primeiro resultado sem acerto. Desative essa opção se desejar somente pares já medidos. A faixa não aprova automaticamente todas as combinações intermediárias. Acerto observado não é garantia de erro zero.
 
 ### Medir outro resíduo
 
@@ -81,7 +81,7 @@ A série usa somente pares com **acerto observado e nenhum erro registrado**, pa
 5. A extensão mede até duas partidas, um lance por partida, escolhendo pares ainda não medidos. Pausa no primeiro resultado sem acerto.
 6. Confira a tabela e configure novamente a série desejada.
 
-A medição pode errar: ela explora combinações novas. A execução comum usa apenas os pares já observados. Se faltar calibração, o EcoBot bloqueia antes de abrir o card.
+A medição pode errar: ela explora combinações novas. Com a medição automática desativada, a execução usa apenas pares observados e bloqueia itens sem calibração suficiente antes de abrir o card.
 
 ### Faixas e pontos
 
